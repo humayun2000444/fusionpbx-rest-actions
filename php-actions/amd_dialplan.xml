@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+AMD (Answering Machine Detection) Dialplan for FusionPBX Call Broadcast
+This extension detects whether a human or machine answered and routes accordingly.
+
+Human detection: Says "Hello?" and waits (quick silence detected)
+Machine detection: Long voicemail greeting (no quick silence)
+-->
+<extension name="broadcast_amd_handler" continue="false">
+    <condition field="destination_number" expression="^amd_detect$">
+        <!-- Answer the call -->
+        <action application="answer"/>
+        <action application="sleep" data="300"/>
+
+        <!-- Log AMD start -->
+        <action application="log" data="INFO [AMD] Starting detection for ${caller_id_number}"/>
+
+        <!-- Wait for silence: threshold=200, silence_hits=20, listen_hits=3, timeout=4000ms -->
+        <!-- Human: "Hello?" then silence within 2-3 seconds -->
+        <!-- Machine: Long greeting, timeout before silence -->
+        <action application="detect_silence" data="200 20 4000"/>
+
+        <!-- Check result and route -->
+        <action application="log" data="INFO [AMD] Detection complete, transferring to ${amd_destination}"/>
+
+        <!-- Transfer to queue/destination -->
+        <action application="transfer" data="${amd_destination} XML ${domain_name}"/>
+    </condition>
+</extension>

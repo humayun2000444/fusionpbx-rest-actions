@@ -1,0 +1,10 @@
+# Ignore test scripts
+*.sh
+!create-user.sh
+
+# Ignore postman collections (too large)
+*.postman_collection.json
+
+# Ignore temp files
+*.tmp
+*.log

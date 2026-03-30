@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Smart IVR Dialplan
+  Add-on module for student information system
+  Does NOT interfere with existing IVR
+-->
+<include>
+  <!-- Smart IVR Inbound Extension -->
+  <extension name="smart_ivr_inbound" continue="false">
+    <condition field="${user_exists}" expression="false"/>
+    <condition field="destination_number" expression="^(SMART_IVR|9999)$">
+      <action application="set" data="hangup_after_bridge=true"/>
+      <action application="answer"/>
+      <action application="sleep" data="1000"/>
+      <action application="lua" data="smart_ivr_inbound.lua"/>
+    </condition>
+  </extension>
+
+  <!-- Smart IVR Outbound Campaign Caller -->
+  <extension name="smart_ivr_outbound" continue="false">
+    <condition field="destination_number" expression="^SMART_IVR_OUT_(\d+)$">
+      <action application="set" data="hangup_after_bridge=true"/>
+      <action application="set" data="continue_on_fail=true"/>
+      <action application="set" data="campaign_uuid=${regex(${destination_number}|SMART_IVR_OUT_(.*))}"/>
+      <action application="lua" data="smart_ivr_outbound.lua"/>
+    </condition>
+  </extension>
+
+  <!-- Smart IVR Outbound Bridge (for originate) -->
+  <extension name="smart_ivr_originate">
+    <condition field="destination_number" expression="^smart_ivr_call$">
+      <action application="answer"/>
+      <action application="lua" data="smart_ivr_outbound.lua"/>
+    </condition>
+  </extension>
+</include>
