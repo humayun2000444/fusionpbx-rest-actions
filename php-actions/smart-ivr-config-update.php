@@ -52,6 +52,16 @@ function do_action($body) {
         $params[':google_tts_language'] = $body->google_tts_language;
     }
 
+    if (isset($body->google_tts_voice_name)) {
+        $update_fields[] = "google_tts_voice_name = :google_tts_voice_name";
+        $params[':google_tts_voice_name'] = $body->google_tts_voice_name;
+    }
+
+    if (isset($body->google_tts_voice_gender)) {
+        $update_fields[] = "google_tts_voice_gender = :google_tts_voice_gender";
+        $params[':google_tts_voice_gender'] = $body->google_tts_voice_gender;
+    }
+
     if (isset($body->welcome_message)) {
         $update_fields[] = "welcome_message = :welcome_message";
         $params[':welcome_message'] = $body->welcome_message;

@@ -21,7 +21,7 @@ if (empty($domain_uuid) || empty($text)) {
 }
 
 // Get Smart IVR configuration
-$sql = "SELECT google_tts_enabled, google_tts_language FROM v_smart_ivr_config WHERE domain_uuid = :domain_uuid LIMIT 1";
+$sql = "SELECT google_tts_enabled, google_tts_language, google_tts_voice_name, google_tts_voice_gender FROM v_smart_ivr_config WHERE domain_uuid = :domain_uuid LIMIT 1";
 $params = [':domain_uuid' => $domain_uuid];
 $database = new database;
 $config = $database->select($sql, $params, 'row');
@@ -40,6 +40,14 @@ if (!$config || !$config['google_tts_enabled']) {
 if ($language == 'en-US') {
     $language = $config['google_tts_language'];
 }
+
+// Use configured voice gender if not specified
+if ($voice_gender == 'FEMALE' && !empty($config['google_tts_voice_gender'])) {
+    $voice_gender = $config['google_tts_voice_gender'];
+}
+
+// Get configured voice name (if set)
+$voice_name = $config['google_tts_voice_name'] ?? null;
 
 // Google Cloud TTS API
 // Note: Requires GOOGLE_APPLICATION_CREDENTIALS environment variable
@@ -87,12 +95,21 @@ if (file_exists($audio_path)) {
 // Call Google Cloud TTS API
 $api_url = 'https://texttospeech.googleapis.com/v1/text:synthesize';
 
+// Build voice configuration
+$voice_config = [
+    'languageCode' => $language,
+    'ssmlGender' => $voice_gender
+];
+
+// If specific voice name is configured, use it for better quality (WaveNet/Neural2 voices)
+// For Bengali, this enables high-quality natural voices like bn-IN-Wavenet-A, bn-IN-Wavenet-B
+if (!empty($voice_name)) {
+    $voice_config['name'] = $voice_name;
+}
+
 $request_data = [
     'input' => ['text' => $text],
-    'voice' => [
-        'languageCode' => $language,
-        'ssmlGender' => $voice_gender
-    ],
+    'voice' => $voice_config,
     'audioConfig' => [
         'audioEncoding' => 'LINEAR16', // WAV format
         'sampleRateHertz' => 8000 // Phone quality
