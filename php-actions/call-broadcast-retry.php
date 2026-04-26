@@ -82,7 +82,9 @@ function do_action($body) {
                 $billsec = intval($cdr['billsec']);
                 $duration = intval($cdr['duration']);
                 $is_answered = ($billsec > 0 && $hangup === 'NORMAL_CLEARING');
-                $is_retryable = in_array($hangup, $retry_causes);
+                // NORMAL_CLEARING with billsec=0 means cancelled before answer - treat as retryable
+                $is_retryable = in_array($hangup, $retry_causes) ||
+                                ($hangup === 'NORMAL_CLEARING' && $billsec == 0);
 
                 if ($is_answered) {
                     $new_status = 'answered';

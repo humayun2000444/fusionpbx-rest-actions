@@ -24,6 +24,19 @@ function log_scheduler($message) {
     file_put_contents($log_file, "[$timestamp] $message\n", FILE_APPEND);
 }
 
+// Read full ESL response (handles multi-line Content-Type headers)
+function esl_read_response($fp) {
+    $response = '';
+    $blank_count = 0;
+    stream_set_timeout($fp, 3);
+    while ($line = fgets($fp, 4096)) {
+        $response .= $line;
+        if (trim($line) === '') $blank_count++;
+        if ($blank_count >= 1 || strpos($response, '+OK') !== false || strpos($response, '-ERR') !== false) break;
+    }
+    return $response;
+}
+
 log_scheduler("Scheduler started");
 
 $database = new database;
@@ -55,10 +68,12 @@ $broadcasts = $database->select($sql, $parameters, "all");
 
 if (empty($broadcasts)) {
     log_scheduler("No scheduled broadcasts found");
-    exit(0);
+    $broadcasts = array();
 }
 
-log_scheduler("Found " . count($broadcasts) . " scheduled broadcast(s) to check");
+if (count($broadcasts) > 0) {
+    log_scheduler("Found " . count($broadcasts) . " scheduled broadcast(s) to check");
+}
 
 foreach ($broadcasts as $broadcast) {
     $uuid = $broadcast['call_broadcast_uuid'];
@@ -243,12 +258,12 @@ function start_broadcast($broadcast, $database) {
         return array("success" => false, "error" => "Cannot connect to FreeSWITCH: $errstr");
     }
 
-    // Authenticate
-    $response = fgets($fp, 1024);
+    // Authenticate - read greeting then send auth
+    esl_read_response($fp);
     fputs($fp, "auth ClueCon\n\n");
-    $response = fgets($fp, 1024);
+    $auth_response = esl_read_response($fp);
 
-    if (strpos($response, '+OK') === false) {
+    if (strpos($auth_response, '+OK') === false) {
         fclose($fp);
         return array("success" => false, "error" => "FreeSWITCH authentication failed");
     }
@@ -349,7 +364,8 @@ function process_broadcast_retry($call_broadcast_uuid, $domain_uuid, $database) 
             if (!empty($cdr)) {
                 $hangup = $cdr['hangup_cause'];
                 $is_answered = (intval($cdr['billsec']) > 0 && $hangup === 'NORMAL_CLEARING');
-                $is_retryable = in_array($hangup, $retry_causes);
+                $is_retryable = in_array($hangup, $retry_causes) ||
+                                ($hangup === 'NORMAL_CLEARING' && intval($cdr['billsec']) == 0);
 
                 if ($is_answered) {
                     $status = 'answered';
@@ -387,9 +403,9 @@ function process_broadcast_retry($call_broadcast_uuid, $domain_uuid, $database) 
         $fp = @fsockopen('127.0.0.1', 8021, $errno, $errstr, 5);
         if (!$fp) return array("success" => false, "error" => "Cannot connect to FreeSWITCH", "synced" => $synced);
 
-        fgets($fp, 1024);
+        esl_read_response($fp);
         fputs($fp, "auth ClueCon\n\n");
-        $auth = fgets($fp, 1024);
+        $auth = esl_read_response($fp);
         if (strpos($auth, '+OK') === false) { fclose($fp); return array("success" => false, "error" => "ESL auth failed"); }
 
         $caller_name = $broadcast['broadcast_caller_id_name'] ?: 'Call Broadcast';
