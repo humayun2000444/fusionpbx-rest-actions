@@ -77,6 +77,25 @@ function do_action($body) {
     $schedule_end_date = isset($body->scheduleEndDate) ? $body->scheduleEndDate :
                         (isset($body->schedule_end_date) ? $body->schedule_end_date : null);
 
+    // Retry parameters
+    $retry_enabled = isset($body->retryEnabled) ? ($body->retryEnabled === true || $body->retryEnabled === 'true') :
+                    (isset($body->retry_enabled) ? ($body->retry_enabled === true || $body->retry_enabled === 'true') : false);
+
+    $retry_max = isset($body->retryMax) ? intval($body->retryMax) :
+                (isset($body->retry_max) ? intval($body->retry_max) : 0);
+
+    $retry_interval = isset($body->retryInterval) ? intval($body->retryInterval) :
+                     (isset($body->retry_interval) ? intval($body->retry_interval) : 300);
+
+    $retry_causes = isset($body->retryCauses) ? $body->retryCauses :
+                   (isset($body->retry_causes) ? $body->retry_causes :
+                   'NO_ANSWER,ORIGINATOR_CANCEL,USER_BUSY,NO_USER_RESPONSE,CALL_REJECTED,NORMAL_TEMPORARY_FAILURE');
+
+    // Handle retry_causes as array
+    if (is_array($retry_causes)) {
+        $retry_causes = implode(',', $retry_causes);
+    }
+
     // Handle phone numbers as array or string
     if (is_array($broadcast_phone_numbers)) {
         $broadcast_phone_numbers = implode("\n", $broadcast_phone_numbers);
@@ -130,8 +149,22 @@ function do_action($body) {
         "broadcast_schedule_date" => $schedule_date,
         "broadcast_schedule_time" => $schedule_time,
         "broadcast_schedule_days" => $schedule_days,
-        "broadcast_schedule_end_date" => $schedule_end_date
+        "broadcast_schedule_end_date" => $schedule_end_date,
+        "broadcast_retry_causes" => $retry_causes
     );
+
+    // Always add retry fields (they have defaults)
+    $columns[] = "broadcast_retry_enabled";
+    $values[] = ":broadcast_retry_enabled";
+    $parameters["broadcast_retry_enabled"] = $retry_enabled ? 'true' : 'false';
+
+    $columns[] = "broadcast_retry_max";
+    $values[] = ":broadcast_retry_max";
+    $parameters["broadcast_retry_max"] = $retry_max;
+
+    $columns[] = "broadcast_retry_interval";
+    $values[] = ":broadcast_retry_interval";
+    $parameters["broadcast_retry_interval"] = $retry_interval;
 
     foreach ($optional_fields as $field => $value) {
         if (!empty($value)) {

@@ -151,6 +151,55 @@ foreach ($broadcasts as $broadcast) {
     }
 }
 
+// ==================== AUTO-RETRY PROCESSING ====================
+// Process retry-pending leads for broadcasts that have retry enabled
+log_scheduler("Checking for retry-pending leads...");
+
+$retry_sql = "SELECT DISTINCT b.call_broadcast_uuid, b.domain_uuid, b.broadcast_name
+              FROM v_call_broadcasts b
+              INNER JOIN v_call_broadcast_leads l ON b.call_broadcast_uuid = l.call_broadcast_uuid
+              WHERE b.broadcast_retry_enabled = 'true'
+              AND b.broadcast_retry_max > 0
+              AND l.lead_status = 'retry_pending'
+              AND l.next_retry_at <= NOW()";
+
+$retry_broadcasts = $database->select($retry_sql, array(), "all");
+
+if (is_array($retry_broadcasts) && count($retry_broadcasts) > 0) {
+    log_scheduler("Found " . count($retry_broadcasts) . " broadcast(s) with retry-pending leads");
+
+    foreach ($retry_broadcasts as $rb) {
+        log_scheduler("Processing retries for broadcast '{$rb['broadcast_name']}' ({$rb['call_broadcast_uuid']})");
+
+        // Call the retry logic
+        $retry_result = process_broadcast_retry($rb['call_broadcast_uuid'], $rb['domain_uuid'], $database);
+
+        if ($retry_result['success']) {
+            log_scheduler("Retry result: synced={$retry_result['synced']}, retried={$retry_result['retried']}");
+        } else {
+            log_scheduler("Retry failed: " . ($retry_result['error'] ?? 'unknown'));
+        }
+    }
+} else {
+    log_scheduler("No retry-pending leads found");
+}
+
+// Also sync CDR status for any leads stuck in 'calling' for > 10 minutes
+$stuck_sql = "SELECT DISTINCT b.call_broadcast_uuid, b.domain_uuid, b.broadcast_name
+              FROM v_call_broadcasts b
+              INNER JOIN v_call_broadcast_leads l ON b.call_broadcast_uuid = l.call_broadcast_uuid
+              WHERE l.lead_status = 'calling'
+              AND l.last_attempt_at < NOW() - INTERVAL '10 minutes'";
+
+$stuck_broadcasts = $database->select($stuck_sql, array(), "all");
+
+if (is_array($stuck_broadcasts) && count($stuck_broadcasts) > 0) {
+    log_scheduler("Found " . count($stuck_broadcasts) . " broadcast(s) with stuck leads, syncing CDR...");
+    foreach ($stuck_broadcasts as $sb) {
+        process_broadcast_retry($sb['call_broadcast_uuid'], $sb['domain_uuid'], $database);
+    }
+}
+
 log_scheduler("Scheduler completed");
 
 /**
@@ -257,4 +306,128 @@ function start_broadcast($broadcast, $database) {
         "scheduledCalls" => $scheduled_calls,
         "totalNumbers" => count($phone_numbers)
     );
+}
+
+/**
+ * Process retry for a broadcast - sync CDR + re-queue eligible leads
+ */
+function process_broadcast_retry($call_broadcast_uuid, $domain_uuid, $database) {
+    // Get broadcast config
+    $broadcast = $database->select(
+        "SELECT * FROM v_call_broadcasts WHERE call_broadcast_uuid = :uuid",
+        array("uuid" => $call_broadcast_uuid), "row"
+    );
+    if (empty($broadcast)) return array("success" => false, "error" => "Not found");
+
+    $retry_max = intval($broadcast['broadcast_retry_max'] ?? 0);
+    $retry_interval = intval($broadcast['broadcast_retry_interval'] ?? 300);
+    $retry_causes_str = $broadcast['broadcast_retry_causes'] ?? 'NO_ANSWER,USER_BUSY';
+    $retry_causes = array_map('trim', explode(',', $retry_causes_str));
+
+    $domain_row = $database->select("SELECT domain_name FROM v_domains WHERE domain_uuid = :uuid",
+        array("uuid" => $domain_uuid), "row");
+    $domain_name = $domain_row ? $domain_row['domain_name'] : 'default';
+
+    // Step 1: Sync 'calling' leads from CDR
+    $calling = $database->select(
+        "SELECT call_broadcast_lead_uuid, phone_number, attempts, max_attempts FROM v_call_broadcast_leads
+         WHERE call_broadcast_uuid = :uuid AND lead_status = 'calling'",
+        array("uuid" => $call_broadcast_uuid), "all"
+    );
+
+    $synced = 0;
+    if (is_array($calling)) {
+        foreach ($calling as $lead) {
+            $cdr = $database->select(
+                "SELECT xml_cdr_uuid, hangup_cause, billsec, duration FROM v_xml_cdr
+                 WHERE domain_uuid = :domain AND (destination_number = :phone OR caller_id_number = :phone2)
+                 AND start_stamp >= (NOW() - INTERVAL '24 hours') ORDER BY start_stamp DESC LIMIT 1",
+                array("domain" => $domain_uuid, "phone" => $lead['phone_number'], "phone2" => $lead['phone_number']),
+                "row"
+            );
+
+            if (!empty($cdr)) {
+                $hangup = $cdr['hangup_cause'];
+                $is_answered = (intval($cdr['billsec']) > 0 && $hangup === 'NORMAL_CLEARING');
+                $is_retryable = in_array($hangup, $retry_causes);
+
+                if ($is_answered) {
+                    $status = 'answered';
+                } elseif ($is_retryable && intval($lead['attempts']) < intval($lead['max_attempts'])) {
+                    $status = 'retry_pending';
+                } elseif ($is_retryable) {
+                    $status = 'skipped';
+                } else {
+                    $status = 'failed';
+                }
+
+                $database->execute(
+                    "UPDATE v_call_broadcast_leads SET lead_status = :status, hangup_cause = :hangup,
+                     billsec = :billsec, call_duration = :duration, xml_cdr_uuid = :cdr,
+                     next_retry_at = " . ($status === 'retry_pending' ? "NOW() + INTERVAL '$retry_interval seconds'" : "NULL") . ",
+                     update_date = NOW() WHERE call_broadcast_lead_uuid = :uuid",
+                    array("status" => $status, "hangup" => $hangup, "billsec" => intval($cdr['billsec']),
+                          "duration" => intval($cdr['duration']), "cdr" => $cdr['xml_cdr_uuid'],
+                          "uuid" => $lead['call_broadcast_lead_uuid'])
+                );
+                $synced++;
+            }
+        }
+    }
+
+    // Step 2: Re-queue retry_pending leads
+    $retries = $database->select(
+        "SELECT call_broadcast_lead_uuid, phone_number FROM v_call_broadcast_leads
+         WHERE call_broadcast_uuid = :uuid AND lead_status = 'retry_pending' AND next_retry_at <= NOW()",
+        array("uuid" => $call_broadcast_uuid), "all"
+    );
+
+    $retried = 0;
+    if (is_array($retries) && count($retries) > 0) {
+        $fp = @fsockopen('127.0.0.1', 8021, $errno, $errstr, 5);
+        if (!$fp) return array("success" => false, "error" => "Cannot connect to FreeSWITCH", "synced" => $synced);
+
+        fgets($fp, 1024);
+        fputs($fp, "auth ClueCon\n\n");
+        $auth = fgets($fp, 1024);
+        if (strpos($auth, '+OK') === false) { fclose($fp); return array("success" => false, "error" => "ESL auth failed"); }
+
+        $caller_name = $broadcast['broadcast_caller_id_name'] ?: 'Call Broadcast';
+        $caller_number = $broadcast['broadcast_caller_id_number'] ?: '0000000000';
+        $dest = $broadcast['broadcast_destination_data'];
+        $accountcode = $broadcast['broadcast_accountcode'] ?: $domain_name;
+        $concurrent = intval($broadcast['broadcast_concurrent_limit']) ?: 5;
+        $timeout = intval($broadcast['broadcast_timeout']) ?: 30;
+        $count = 1;
+        $delay = 3;
+
+        foreach ($retries as $lead) {
+            $phone = $lead['phone_number'];
+            $vars = "^^:ignore_early_media=true:ignore_display_updates=true:sip_cid_type=none";
+            $vars .= ":origination_caller_id_name='$caller_name':origination_caller_id_number=$caller_number";
+            $vars .= ":caller_id_number=$phone:caller_id_name=$phone";
+            $vars .= ":effective_caller_id_number=$phone:effective_caller_id_name=$phone";
+            $vars .= ":destination_number=$phone:domain_uuid=$domain_uuid:domain_name=$domain_name";
+            $vars .= ":accountcode='$accountcode':call_broadcast_uuid=$call_broadcast_uuid";
+
+            $cmd = "api sched_api +$delay retry_{$call_broadcast_uuid} originate {" . $vars . "}sofia/gateway/BTCL/$phone &transfer($dest)\n\n";
+            fputs($fp, $cmd);
+            fgets($fp, 1024);
+
+            $database->execute(
+                "UPDATE v_call_broadcast_leads SET lead_status = 'calling', attempts = attempts + 1,
+                 last_attempt_at = NOW(), next_retry_at = NULL, update_date = NOW()
+                 WHERE call_broadcast_lead_uuid = :uuid",
+                array("uuid" => $lead['call_broadcast_lead_uuid'])
+            );
+
+            $retried++;
+            if ($count >= $concurrent) { $delay += $timeout; $count = 0; }
+            $count++;
+        }
+
+        fclose($fp);
+    }
+
+    return array("success" => true, "synced" => $synced, "retried" => $retried);
 }

@@ -81,7 +81,16 @@ function do_action($body) {
         "scheduleDays" => "broadcast_schedule_days",
         "schedule_days" => "broadcast_schedule_days",
         "scheduleEndDate" => "broadcast_schedule_end_date",
-        "schedule_end_date" => "broadcast_schedule_end_date"
+        "schedule_end_date" => "broadcast_schedule_end_date",
+        // Retry fields
+        "retryEnabled" => "broadcast_retry_enabled",
+        "retry_enabled" => "broadcast_retry_enabled",
+        "retryMax" => "broadcast_retry_max",
+        "retry_max" => "broadcast_retry_max",
+        "retryInterval" => "broadcast_retry_interval",
+        "retry_interval" => "broadcast_retry_interval",
+        "retryCauses" => "broadcast_retry_causes",
+        "retry_causes" => "broadcast_retry_causes"
     );
 
     foreach ($field_mappings as $input_field => $db_field) {
@@ -98,9 +107,14 @@ function do_action($body) {
                 $value = implode(",", $value);
             }
 
-            // Handle schedule_enabled boolean
-            if ($db_field == "broadcast_schedule_enabled") {
+            // Handle boolean fields
+            if ($db_field == "broadcast_schedule_enabled" || $db_field == "broadcast_retry_enabled") {
                 $value = ($value === true || $value === 'true') ? 'true' : 'false';
+            }
+
+            // Handle retry_causes as array
+            if ($db_field == "broadcast_retry_causes" && is_array($value)) {
+                $value = implode(",", $value);
             }
 
             $updates[] = "$db_field = :$db_field";
