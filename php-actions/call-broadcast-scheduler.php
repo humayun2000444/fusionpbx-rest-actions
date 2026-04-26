@@ -426,9 +426,10 @@ function process_broadcast_retry($call_broadcast_uuid, $domain_uuid, $database) 
             $vars .= ":destination_number=$phone:domain_uuid=$domain_uuid:domain_name=$domain_name";
             $vars .= ":accountcode='$accountcode':call_broadcast_uuid=$call_broadcast_uuid";
 
-            $cmd = "api sched_api +$delay retry_{$call_broadcast_uuid} originate {" . $vars . "}sofia/gateway/BTCL/$phone &transfer($dest)\n\n";
+            $origination_url = "{" . $vars . "}loopback/$phone/$domain_name";
+            $cmd = "api sched_api +$delay retry_{$call_broadcast_uuid} originate $origination_url $dest XML $domain_name\n\n";
             fputs($fp, $cmd);
-            fgets($fp, 1024);
+            esl_read_response($fp);
 
             $database->execute(
                 "UPDATE v_call_broadcast_leads SET lead_status = 'calling', attempts = attempts + 1,
