@@ -199,12 +199,12 @@ if (is_array($retry_broadcasts) && count($retry_broadcasts) > 0) {
     log_scheduler("No retry-pending leads found");
 }
 
-// Also sync CDR status for any leads stuck in 'calling' for > 10 minutes
+// Sync CDR status for any leads in 'calling' state (older than 1 minute to allow call to complete)
 $stuck_sql = "SELECT DISTINCT b.call_broadcast_uuid, b.domain_uuid, b.broadcast_name
               FROM v_call_broadcasts b
               INNER JOIN v_call_broadcast_leads l ON b.call_broadcast_uuid = l.call_broadcast_uuid
               WHERE l.lead_status = 'calling'
-              AND l.last_attempt_at < NOW() - INTERVAL '10 minutes'";
+              AND l.last_attempt_at < NOW() - INTERVAL '1 minute'";
 
 $stuck_broadcasts = $database->select($stuck_sql, array(), "all");
 
