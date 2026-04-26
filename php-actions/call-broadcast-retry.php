@@ -70,7 +70,7 @@ function do_action($body) {
                         WHERE domain_uuid = :domain_uuid
                         AND (destination_number = :phone OR caller_id_number = :phone2)
                         AND start_stamp >= (NOW() - INTERVAL '24 hours')
-                        ORDER BY start_stamp DESC LIMIT 1";
+                        ORDER BY billsec DESC, start_stamp DESC LIMIT 1";
             $cdr = $database->select($cdr_sql, array(
                 "domain_uuid" => $db_domain_uuid,
                 "phone" => $lead['phone_number'],

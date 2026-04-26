@@ -356,7 +356,7 @@ function process_broadcast_retry($call_broadcast_uuid, $domain_uuid, $database) 
             $cdr = $database->select(
                 "SELECT xml_cdr_uuid, hangup_cause, billsec, duration FROM v_xml_cdr
                  WHERE domain_uuid = :domain AND (destination_number = :phone OR caller_id_number = :phone2)
-                 AND start_stamp >= (NOW() - INTERVAL '24 hours') ORDER BY start_stamp DESC LIMIT 1",
+                 AND start_stamp >= (NOW() - INTERVAL '24 hours') ORDER BY billsec DESC, start_stamp DESC LIMIT 1",
                 array("domain" => $domain_uuid, "phone" => $lead['phone_number'], "phone2" => $lead['phone_number']),
                 "row"
             );
