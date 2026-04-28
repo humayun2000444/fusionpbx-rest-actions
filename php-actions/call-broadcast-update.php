@@ -5,6 +5,8 @@ $required_params = array("callBroadcastUuid");
 function do_action($body) {
     global $domain_uuid;
 
+
+
     // Use domain_uuid from request if provided, otherwise use global
     $db_domain_uuid = isset($body->domain_uuid) ? $body->domain_uuid : $domain_uuid;
 
