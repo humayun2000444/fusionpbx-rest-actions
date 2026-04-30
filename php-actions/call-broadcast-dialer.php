@@ -234,10 +234,21 @@ function originate_call($fp, $lead, $broadcast, $domain_name) {
         $vars .= ":execute_on_answer='wait_for_silence 200 25 3 4000'";
     }
 
-    // Originate via gateway
-    $cmd = "bgapi originate {" . $vars . "}sofia/gateway/BTCL/$phone &transfer($destination XML $domain_name)";
+    // Originate via gateway with &transfer() - same as working scheduler
+    // For queue destination: transfer to queue extension in dialplan
+    // For extension destination: transfer directly
+    $dest_type = $broadcast['broadcast_destination_type'] ?: 'transfer';
+    if ($dest_type === 'queue') {
+        $cmd = "bgapi originate {" . $vars . "}sofia/gateway/BTCL/$phone &transfer($destination XML $domain_name)";
+    } else {
+        $cmd = "bgapi originate {" . $vars . "}sofia/gateway/BTCL/$phone &transfer($destination XML $domain_name)";
+    }
     fputs($fp, "$cmd\n\n");
-    esl_read_response($fp);
+    $response = esl_read_response($fp);
+
+    // Log originate result for debugging
+    $result_line = trim(str_replace(array("\n", "\r"), ' ', $response));
+    dialer_log("[originate] $phone → " . substr($result_line, 0, 200));
 }
 
 /**
@@ -440,7 +451,27 @@ function sync_cdr_for_predictive($database, $broadcasts) {
                 "row"
             );
 
-            if (empty($cdr)) continue;
+            if (empty($cdr)) {
+                // No CDR found - check if lead has been stuck too long (>5 min = originate failed)
+                $stuck_check = $database->select(
+                    "SELECT last_attempt_at FROM v_call_broadcast_leads WHERE call_broadcast_lead_uuid = :uuid",
+                    array("uuid" => $lead['call_broadcast_lead_uuid']), "row"
+                );
+                if ($stuck_check && !empty($stuck_check['last_attempt_at'])) {
+                    $last_attempt = strtotime($stuck_check['last_attempt_at']);
+                    $stuck_minutes = (time() - $last_attempt) / 60;
+                    if ($stuck_minutes > 5) {
+                        // Stuck for >5 min with no CDR = originate failed, mark as failed
+                        dialer_log("[CDR sync] {$lead['phone_number']} stuck in calling for " . round($stuck_minutes) . " min with no CDR. Marking failed.");
+                        $database->execute(
+                            "UPDATE v_call_broadcast_leads SET lead_status = 'failed', hangup_cause = 'ORIGINATE_FAILED',
+                             update_date = NOW() WHERE call_broadcast_lead_uuid = :uuid",
+                            array("uuid" => $lead['call_broadcast_lead_uuid'])
+                        );
+                    }
+                }
+                continue;
+            }
 
             $hangup = $cdr['hangup_cause'];
             $billsec = intval($cdr['billsec']);
