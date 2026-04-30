@@ -221,28 +221,29 @@ function originate_call($fp, $lead, $broadcast, $domain_name) {
     $timeout = intval($broadcast['broadcast_timeout']) ?: 30;
     $avmd = $broadcast['broadcast_avmd'] === 'true';
 
-    // Build channel variables
+    // Build channel variables - EXACT same format as working start.php (power mode)
     $vars = "^^:ignore_early_media=true:ignore_display_updates=true:sip_cid_type=none";
-    $vars .= ":origination_caller_id_name='$caller_id_name':origination_caller_id_number=$caller_id_number";
-    $vars .= ":caller_id_number=$phone:caller_id_name=$phone";
-    $vars .= ":effective_caller_id_number=$phone:effective_caller_id_name=$phone";
-    $vars .= ":destination_number=$phone:domain_uuid=$domain_uuid:domain_name=$domain_name";
-    $vars .= ":accountcode='$accountcode':call_broadcast_uuid=$call_broadcast_uuid";
-    $vars .= ":originate_timeout=$timeout";
+    $vars .= ":origination_number=$phone";
+    $vars .= ":destination_number=$phone";
+    $vars .= ":origination_caller_id_name='$caller_id_name'";
+    $vars .= ":origination_caller_id_number=$caller_id_number";
+    $vars .= ":caller_id_number=$phone";
+    $vars .= ":caller_id_name=$phone";
+    $vars .= ":effective_caller_id_number=$phone";
+    $vars .= ":effective_caller_id_name=$phone";
+    $vars .= ":domain_uuid=$domain_uuid";
+    $vars .= ":domain=$domain_name";
+    $vars .= ":domain_name=$domain_name";
+    $vars .= ":accountcode='$accountcode'";
+    $vars .= ":call_broadcast_uuid=$call_broadcast_uuid";
 
     if ($avmd) {
+        $vars .= ":amd_destination=$destination";
         $vars .= ":execute_on_answer='wait_for_silence 200 25 3 4000'";
     }
 
-    // Originate via gateway with &transfer() - same as working scheduler
-    // For queue destination: transfer to queue extension in dialplan
-    // For extension destination: transfer directly
-    $dest_type = $broadcast['broadcast_destination_type'] ?: 'transfer';
-    if ($dest_type === 'queue') {
-        $cmd = "bgapi originate {" . $vars . "}sofia/gateway/BTCL/$phone &transfer($destination XML $domain_name)";
-    } else {
-        $cmd = "bgapi originate {" . $vars . "}sofia/gateway/BTCL/$phone &transfer($destination XML $domain_name)";
-    }
+    // Originate via loopback - EXACT same as working start.php
+    $cmd = "bgapi originate {" . $vars . "}loopback/$phone/$domain_name $destination XML $domain_name";
     fputs($fp, "$cmd\n\n");
     $response = esl_read_response($fp);
 
