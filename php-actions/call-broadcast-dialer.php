@@ -206,10 +206,14 @@ function get_abandon_rate($database, $call_broadcast_uuid) {
 /**
  * Originate a call for a lead
  */
-function originate_call($fp, $lead, $broadcast, $domain_name) {
+function originate_call($fp, $lead, $broadcast, $domain_name, $database) {
     $phone = $lead['phone_number'];
+    $lead_uuid = $lead['call_broadcast_lead_uuid'];
     $call_broadcast_uuid = $broadcast['call_broadcast_uuid'];
     $domain_uuid = $broadcast['domain_uuid'];
+
+    // Generate a call UUID upfront so we can track it in CDR
+    $call_uuid = uuid();
 
     // Random CID from pool
     $caller_id_pool = array_filter(array_map('trim', explode(',', $broadcast['broadcast_caller_id_number'] ?: '0000000000')));
@@ -222,7 +226,8 @@ function originate_call($fp, $lead, $broadcast, $domain_name) {
     $avmd = $broadcast['broadcast_avmd'] === 'true';
 
     // Build channel variables - EXACT same format as working start.php (power mode)
-    $vars = "^^:ignore_early_media=true:ignore_display_updates=true:sip_cid_type=none";
+    $vars = "^^:origination_uuid=$call_uuid";
+    $vars .= ":ignore_early_media=true:ignore_display_updates=true:sip_cid_type=none";
     $vars .= ":origination_number=$phone";
     $vars .= ":destination_number=$phone";
     $vars .= ":origination_caller_id_name='$caller_id_name'";
@@ -242,6 +247,12 @@ function originate_call($fp, $lead, $broadcast, $domain_name) {
         $vars .= ":execute_on_answer='wait_for_silence 200 25 3 4000'";
     }
 
+    // Store call_uuid on lead record for CDR matching
+    $database->execute(
+        "UPDATE v_call_broadcast_leads SET call_uuid = :call_uuid WHERE call_broadcast_lead_uuid = :lead_uuid",
+        array("call_uuid" => $call_uuid, "lead_uuid" => $lead_uuid)
+    );
+
     // Originate via loopback - EXACT same as working start.php
     $cmd = "bgapi originate {" . $vars . "}loopback/$phone/$domain_name $destination XML $domain_name";
     fputs($fp, "$cmd\n\n");
@@ -249,7 +260,7 @@ function originate_call($fp, $lead, $broadcast, $domain_name) {
 
     // Log originate result for debugging
     $result_line = trim(str_replace(array("\n", "\r"), ' ', $response));
-    dialer_log("[originate] $phone → " . substr($result_line, 0, 200));
+    dialer_log("[originate] $phone (call_uuid=$call_uuid) → " . substr($result_line, 0, 200));
 }
 
 /**
@@ -385,7 +396,7 @@ while ($running) {
         // 6. Originate calls
         $dialed = 0;
         foreach ($leads as $lead) {
-            originate_call($fp, $lead, $broadcast, $domain_name);
+            originate_call($fp, $lead, $broadcast, $domain_name, $database);
 
             // Mark lead as calling
             $database->execute(
@@ -435,7 +446,7 @@ function sync_cdr_for_predictive($database, $broadcasts) {
 
         // Get leads in 'calling' state older than 30 seconds
         $calling = $database->select(
-            "SELECT call_broadcast_lead_uuid, phone_number, attempts, max_attempts FROM v_call_broadcast_leads
+            "SELECT call_broadcast_lead_uuid, phone_number, attempts, max_attempts, call_uuid FROM v_call_broadcast_leads
              WHERE call_broadcast_uuid = :uuid AND lead_status = 'calling'
              AND last_attempt_at < NOW() - INTERVAL '30 seconds'",
             array("uuid" => $uuid), "all"
@@ -444,13 +455,39 @@ function sync_cdr_for_predictive($database, $broadcasts) {
         if (!is_array($calling) || empty($calling)) continue;
 
         foreach ($calling as $lead) {
-            $cdr = $database->select(
-                "SELECT xml_cdr_uuid, hangup_cause, billsec, duration FROM v_xml_cdr
-                 WHERE domain_uuid = :domain AND (destination_number = :phone OR caller_id_number = :phone2)
-                 AND start_stamp >= (NOW() - INTERVAL '10 minutes') ORDER BY billsec DESC, start_stamp DESC LIMIT 1",
-                array("domain" => $domain_uuid, "phone" => $lead['phone_number'], "phone2" => $lead['phone_number']),
-                "row"
-            );
+            $cdr = null;
+
+            // Match by call_uuid first (exact, reliable)
+            if (!empty($lead['call_uuid'])) {
+                $cdr = $database->select(
+                    "SELECT xml_cdr_uuid, hangup_cause, billsec, duration FROM v_xml_cdr
+                     WHERE xml_cdr_uuid = :call_uuid::uuid",
+                    array("call_uuid" => $lead['call_uuid']),
+                    "row"
+                );
+                // If no CDR for A-leg yet, check B-leg (bridge_uuid or originating_leg_uuid)
+                if (empty($cdr)) {
+                    $cdr = $database->select(
+                        "SELECT xml_cdr_uuid, hangup_cause, billsec, duration FROM v_xml_cdr
+                         WHERE (bridge_uuid = :call_uuid::uuid OR originating_leg_uuid = :call_uuid2::uuid)
+                         AND domain_uuid = :domain
+                         ORDER BY billsec DESC LIMIT 1",
+                        array("call_uuid" => $lead['call_uuid'], "call_uuid2" => $lead['call_uuid'], "domain" => $domain_uuid),
+                        "row"
+                    );
+                }
+            }
+
+            // Fallback: match by phone number (for leads without call_uuid)
+            if (empty($cdr)) {
+                $cdr = $database->select(
+                    "SELECT xml_cdr_uuid, hangup_cause, billsec, duration FROM v_xml_cdr
+                     WHERE domain_uuid = :domain AND destination_number = :phone
+                     AND start_stamp >= (NOW() - INTERVAL '10 minutes') ORDER BY billsec DESC, start_stamp DESC LIMIT 1",
+                    array("domain" => $domain_uuid, "phone" => $lead['phone_number']),
+                    "row"
+                );
+            }
 
             if (empty($cdr)) {
                 // No CDR found - check if lead has been stuck too long (>5 min = originate failed)
