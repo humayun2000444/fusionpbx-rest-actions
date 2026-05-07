@@ -52,7 +52,7 @@ function do_action($body) {
         broadcast_start_time, broadcast_timeout, broadcast_concurrent_limit,
         recording_uuid, broadcast_caller_id_name, broadcast_caller_id_number,
         broadcast_destination_type, broadcast_destination_data,
-        NULL, broadcast_avmd, broadcast_accountcode, broadcast_toll_allow,
+        broadcast_phone_numbers, broadcast_avmd, broadcast_accountcode, broadcast_toll_allow,
         broadcast_schedule_enabled, broadcast_schedule_type, NULL,
         broadcast_schedule_time, broadcast_schedule_days, NULL,
         broadcast_retry_enabled, broadcast_retry_max, broadcast_retry_interval, broadcast_retry_causes,
