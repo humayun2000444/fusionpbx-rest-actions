@@ -455,39 +455,18 @@ function sync_cdr_for_predictive($database, $broadcasts) {
         if (!is_array($calling) || empty($calling)) continue;
 
         foreach ($calling as $lead) {
-            $cdr = null;
-
-            // Match by call_uuid first (exact, reliable)
-            if (!empty($lead['call_uuid'])) {
-                $cdr = $database->select(
-                    "SELECT xml_cdr_uuid, hangup_cause, billsec, duration FROM v_xml_cdr
-                     WHERE xml_cdr_uuid = :call_uuid::uuid",
-                    array("call_uuid" => $lead['call_uuid']),
-                    "row"
-                );
-                // If no CDR for A-leg yet, check B-leg (bridge_uuid or originating_leg_uuid)
-                if (empty($cdr)) {
-                    $cdr = $database->select(
-                        "SELECT xml_cdr_uuid, hangup_cause, billsec, duration FROM v_xml_cdr
-                         WHERE (bridge_uuid = :call_uuid::uuid OR originating_leg_uuid = :call_uuid2::uuid)
-                         AND domain_uuid = :domain
-                         ORDER BY billsec DESC LIMIT 1",
-                        array("call_uuid" => $lead['call_uuid'], "call_uuid2" => $lead['call_uuid'], "domain" => $domain_uuid),
-                        "row"
-                    );
-                }
-            }
-
-            // Fallback: match by phone number (for leads without call_uuid)
-            if (empty($cdr)) {
-                $cdr = $database->select(
-                    "SELECT xml_cdr_uuid, hangup_cause, billsec, duration FROM v_xml_cdr
-                     WHERE domain_uuid = :domain AND destination_number = :phone
-                     AND start_stamp >= (NOW() - INTERVAL '10 minutes') ORDER BY billsec DESC, start_stamp DESC LIMIT 1",
-                    array("domain" => $domain_uuid, "phone" => $lead['phone_number']),
-                    "row"
-                );
-            }
+            // Match the OUTBOUND leg CDR: direction='outbound', destination=phone
+            // This is the actual call to the customer, not the loopback/queue legs
+            $cdr = $database->select(
+                "SELECT xml_cdr_uuid, hangup_cause, billsec, duration FROM v_xml_cdr
+                 WHERE domain_uuid = :domain
+                 AND direction = 'outbound'
+                 AND destination_number = :phone
+                 AND start_stamp >= (NOW() - INTERVAL '10 minutes')
+                 ORDER BY start_stamp DESC LIMIT 1",
+                array("domain" => $domain_uuid, "phone" => $lead['phone_number']),
+                "row"
+            );
 
             if (empty($cdr)) {
                 // No CDR found - check if lead has been stuck too long (>5 min = originate failed)
