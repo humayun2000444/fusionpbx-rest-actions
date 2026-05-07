@@ -470,22 +470,20 @@ function sync_cdr_for_predictive($database, $broadcasts) {
 
             if (empty($cdr)) {
                 // No CDR found - check if lead has been stuck too long (>5 min = originate failed)
+                // Use DB time comparison to avoid PHP/DB timezone mismatch
                 $stuck_check = $database->select(
-                    "SELECT last_attempt_at FROM v_call_broadcast_leads WHERE call_broadcast_lead_uuid = :uuid",
+                    "SELECT EXTRACT(EPOCH FROM (NOW() - last_attempt_at)) / 60 as stuck_minutes
+                     FROM v_call_broadcast_leads WHERE call_broadcast_lead_uuid = :uuid AND last_attempt_at IS NOT NULL",
                     array("uuid" => $lead['call_broadcast_lead_uuid']), "row"
                 );
-                if ($stuck_check && !empty($stuck_check['last_attempt_at'])) {
-                    $last_attempt = strtotime($stuck_check['last_attempt_at']);
-                    $stuck_minutes = (time() - $last_attempt) / 60;
-                    if ($stuck_minutes > 5) {
-                        // Stuck for >5 min with no CDR = originate failed, mark as failed
-                        dialer_log("[CDR sync] {$lead['phone_number']} stuck in calling for " . round($stuck_minutes) . " min with no CDR. Marking failed.");
-                        $database->execute(
-                            "UPDATE v_call_broadcast_leads SET lead_status = 'failed', hangup_cause = 'ORIGINATE_FAILED',
-                             update_date = NOW() WHERE call_broadcast_lead_uuid = :uuid",
-                            array("uuid" => $lead['call_broadcast_lead_uuid'])
-                        );
-                    }
+                if ($stuck_check && floatval($stuck_check['stuck_minutes']) > 5) {
+                    $stuck_minutes = round(floatval($stuck_check['stuck_minutes']));
+                    dialer_log("[CDR sync] {$lead['phone_number']} stuck in calling for {$stuck_minutes} min with no CDR. Marking failed.");
+                    $database->execute(
+                        "UPDATE v_call_broadcast_leads SET lead_status = 'failed', hangup_cause = 'ORIGINATE_FAILED',
+                         update_date = NOW() WHERE call_broadcast_lead_uuid = :uuid",
+                        array("uuid" => $lead['call_broadcast_lead_uuid'])
+                    );
                 }
                 continue;
             }
