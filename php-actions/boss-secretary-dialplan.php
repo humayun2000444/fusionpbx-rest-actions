@@ -27,9 +27,17 @@ function generate_boss_secretary_dialplan($database, $dialplan_uuid, $domain_uui
     if ($mode !== 'off') {
         $xml .= '	<condition field="destination_number" expression="^' . $boss_ext . '$"/>' . "\n";
         $xml .= '	<condition field="${boss_secretary_screened}" expression="^true$">' . "\n";
+        // Screened call (secretary transferring to boss) - bridge with busy/no-answer fallback
         $xml .= '		<action application="set" data="hangup_after_bridge=true"/>' . "\n";
         $xml .= '		<action application="set" data="call_timeout=30"/>' . "\n";
-        $xml .= '		<action application="bridge" data="user/' . $boss_ext . '@' . $domain_name . '"/>' . "\n";
+        $xml .= '		<action application="set" data="continue_on_fail=true"/>' . "\n";
+        $xml .= '		<action application="set" data="fail_on_single_reject=USER_BUSY"/>' . "\n";
+        $xml .= '		<action application="bridge" data="{sip_invite_cid_type=none}user/' . $boss_ext . '@' . $domain_name . '"/>' . "\n";
+        // If boss busy or no answer - transfer back to secretary
+        $xml .= '		<action application="set" data="boss_secretary_screened=false"/>' . "\n";
+        $xml .= '		<action application="set" data="effective_caller_id_name=BUSY ' . $cid_prefix . '${caller_id_name}"/>' . "\n";
+        $xml .= '		<action application="transfer" data="' . $secretary_ext . ' XML ' . $domain_name . '"/>' . "\n";
+        // First time call (not screened) - route to secretary
         $xml .= '		<anti-action application="export" data="boss_secretary_screened=true"/>' . "\n";
         $xml .= '		<anti-action application="set" data="effective_caller_id_name=' . $cid_prefix . '${caller_id_name}"/>' . "\n";
         $xml .= '		<anti-action application="set" data="call_timeout=' . $ring_timeout . '"/>' . "\n";
