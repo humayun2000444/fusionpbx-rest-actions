@@ -2,7 +2,7 @@
 
 $required_params = array("bossSecretaryUuid");
 
-define('BOSS_SEC_APP_UUID', 'b0555ec4-e7a4-4000-b055-000000000001');
+require_once dirname(__FILE__) . '/boss-secretary-dialplan.php';
 
 function do_action($body) {
     global $domain_uuid;
@@ -79,7 +79,6 @@ function do_action($body) {
             $database->execute("UPDATE v_boss_secretary SET dialplan_uuid = :dp WHERE boss_secretary_uuid = :uuid",
                 array("dp" => $dialplan_uuid, "uuid" => $bs_uuid));
         }
-        require_once dirname(__FILE__) . '/boss-secretary-create.php';
         generate_boss_secretary_dialplan($database, $dialplan_uuid, $db_domain_uuid, $domain_name,
             $boss_ext, $secretary_ext, $mode, $vip_list, $ring_timeout, $cid_prefix, $boss_name);
     }
