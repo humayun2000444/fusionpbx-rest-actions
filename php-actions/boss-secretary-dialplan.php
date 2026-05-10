@@ -30,7 +30,7 @@ function generate_boss_secretary_dialplan($database, $dialplan_uuid, $domain_uui
         $xml .= '<extension name="Boss-Secretary Check: ' . $boss_ext . '" continue="true">' . "\n";
         $xml .= '	<condition field="destination_number" expression="^' . $boss_ext . '$"/>' . "\n";
         $xml .= '	<condition field="${boss_secretary_screened}" expression="^true$">' . "\n";
-        $xml .= '		<action application="lua" data="app/rest_api/actions/boss-secretary-busy-check.lua ' . $boss_ext . ' ' . $domain_name . '"/>' . "\n";
+        $xml .= '		<action application="lua" data="boss-secretary-busy-check.lua ' . $boss_ext . ' ' . $domain_name . '"/>' . "\n";
         $xml .= '	</condition>' . "\n";
         $xml .= '</extension>' . "\n";
 
