@@ -31,12 +31,12 @@ if result then
 end
 
 if busy then
-    -- Boss is busy - route back to secretary with BUSY prefix
-    freeswitch.consoleLog("NOTICE", "[boss-secretary] Boss " .. boss_ext .. " is BUSY, routing back to secretary " .. secretary_ext .. "\n")
-    session:setVariable("boss_secretary_screened", "false")
+    -- Boss is busy - bridge directly to secretary (bypass dialplan to avoid loop)
+    freeswitch.consoleLog("NOTICE", "[boss-secretary] Boss " .. boss_ext .. " is BUSY, bridging to secretary " .. secretary_ext .. "\n")
     session:setVariable("effective_caller_id_name", "BUSY " .. cid_prefix .. " " .. (session:getVariable("caller_id_name") or ""))
+    session:setVariable("hangup_after_bridge", "true")
     session:setVariable("call_timeout", "20")
-    session:execute("transfer", secretary_ext .. " XML " .. domain)
+    session:execute("bridge", "user/" .. secretary_ext .. "@" .. domain)
 else
     -- Boss is free - bridge to boss
     freeswitch.consoleLog("NOTICE", "[boss-secretary] Boss " .. boss_ext .. " is FREE, bridging\n")
@@ -44,12 +44,13 @@ else
     session:setVariable("call_timeout", "30")
     session:execute("bridge", "user/" .. boss_ext .. "@" .. domain)
 
-    -- If bridge fails (no answer/timeout) - route back to secretary
+    -- If bridge fails (no answer/timeout) - bridge directly to secretary
     local hangup_cause = session:getVariable("originate_disposition") or ""
     if hangup_cause ~= "SUCCESS" and session:ready() then
-        freeswitch.consoleLog("NOTICE", "[boss-secretary] Boss " .. boss_ext .. " no answer (" .. hangup_cause .. "), routing back to secretary\n")
-        session:setVariable("boss_secretary_screened", "false")
+        freeswitch.consoleLog("NOTICE", "[boss-secretary] Boss " .. boss_ext .. " no answer (" .. hangup_cause .. "), bridging to secretary\n")
         session:setVariable("effective_caller_id_name", "NOANSWER " .. cid_prefix .. " " .. (session:getVariable("caller_id_name") or ""))
-        session:execute("transfer", secretary_ext .. " XML " .. domain)
+        session:setVariable("hangup_after_bridge", "true")
+        session:setVariable("call_timeout", "20")
+        session:execute("bridge", "user/" .. secretary_ext .. "@" .. domain)
     end
 end
