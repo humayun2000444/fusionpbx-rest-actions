@@ -16,19 +16,21 @@ function generate_boss_secretary_dialplan($database, $dialplan_uuid, $domain_uui
         $vip_numbers = array_filter(array_map('trim', explode(',', $vip_list)));
         if (!empty($vip_numbers)) {
             $vip_regex = '^(' . implode('|', array_map(function($n) { return preg_quote($n, '/'); }, $vip_numbers)) . ')$';
-            $xml .= '	<condition field="destination_number" expression="^' . $boss_ext . '$" break="never">' . "\n";
-            $xml .= '	</condition>' . "\n";
+            $xml .= '	<condition field="destination_number" expression="^' . $boss_ext . '$"/>' . "\n";
             $xml .= '	<condition field="caller_id_number" expression="' . $vip_regex . '">' . "\n";
             $xml .= '		<action application="transfer" data="' . $boss_ext . ' XML ' . $domain_name . '"/>' . "\n";
             $xml .= '	</condition>' . "\n";
         }
     }
 
-    // Secretary route (default for non-VIP, skip if caller IS the secretary to prevent loop)
+    // Secretary route: if already screened, bridge to boss directly. Otherwise route to secretary.
     if ($mode !== 'off') {
-        $xml .= '	<condition field="destination_number" expression="^' . $boss_ext . '$" break="never">' . "\n";
-        $xml .= '	</condition>' . "\n";
-        $xml .= '	<condition field="caller_id_number" expression="^' . $secretary_ext . '$" break="on-true">' . "\n";
+        $xml .= '	<condition field="destination_number" expression="^' . $boss_ext . '$"/>' . "\n";
+        $xml .= '	<condition field="${boss_secretary_screened}" expression="^true$">' . "\n";
+        $xml .= '		<action application="set" data="hangup_after_bridge=true"/>' . "\n";
+        $xml .= '		<action application="set" data="call_timeout=30"/>' . "\n";
+        $xml .= '		<action application="bridge" data="user/' . $boss_ext . '@' . $domain_name . '"/>' . "\n";
+        $xml .= '		<anti-action application="export" data="boss_secretary_screened=true"/>' . "\n";
         $xml .= '		<anti-action application="set" data="effective_caller_id_name=' . $cid_prefix . '${caller_id_name}"/>' . "\n";
         $xml .= '		<anti-action application="set" data="call_timeout=' . $ring_timeout . '"/>' . "\n";
         $xml .= '		<anti-action application="transfer" data="' . $secretary_ext . ' XML ' . $domain_name . '"/>' . "\n";
