@@ -24,12 +24,14 @@ function generate_boss_secretary_dialplan($database, $dialplan_uuid, $domain_uui
         }
     }
 
-    // Secretary route (default for non-VIP)
+    // Secretary route (default for non-VIP, skip if caller IS the secretary to prevent loop)
     if ($mode !== 'off') {
-        $xml .= '	<condition field="destination_number" expression="^' . $boss_ext . '$">' . "\n";
-        $xml .= '		<action application="set" data="effective_caller_id_name=' . $cid_prefix . '${caller_id_name}"/>' . "\n";
-        $xml .= '		<action application="set" data="call_timeout=' . $ring_timeout . '"/>' . "\n";
-        $xml .= '		<action application="transfer" data="' . $secretary_ext . ' XML ' . $domain_name . '"/>' . "\n";
+        $xml .= '	<condition field="destination_number" expression="^' . $boss_ext . '$" break="never">' . "\n";
+        $xml .= '	</condition>' . "\n";
+        $xml .= '	<condition field="caller_id_number" expression="^' . $secretary_ext . '$" break="on-true">' . "\n";
+        $xml .= '		<anti-action application="set" data="effective_caller_id_name=' . $cid_prefix . '${caller_id_name}"/>' . "\n";
+        $xml .= '		<anti-action application="set" data="call_timeout=' . $ring_timeout . '"/>' . "\n";
+        $xml .= '		<anti-action application="transfer" data="' . $secretary_ext . ' XML ' . $domain_name . '"/>' . "\n";
         $xml .= '	</condition>' . "\n";
     }
 
