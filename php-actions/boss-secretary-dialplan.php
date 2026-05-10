@@ -27,20 +27,29 @@ function generate_boss_secretary_dialplan($database, $dialplan_uuid, $domain_uui
 
     if ($mode !== 'off') {
         // Extension 2: Screened call - secretary transferred to boss
-        // Use limit to allow only 1 call to boss - if limit exceeded = boss busy
+        // Check if boss has active call via hash last_dial_ext UUID, then try uuid_exists
         $xml .= '<extension name="Boss-Secretary Bridge: ' . $boss_ext . '" continue="false">' . "\n";
         $xml .= '	<condition field="destination_number" expression="^' . $boss_ext . '$"/>' . "\n";
         $xml .= '	<condition field="${boss_secretary_screened}" expression="^true$">' . "\n";
-        $xml .= '		<action application="set" data="hangup_after_bridge=true"/>' . "\n";
-        $xml .= '		<action application="set" data="call_timeout=30"/>' . "\n";
-        $xml .= '		<action application="set" data="continue_on_fail=true"/>' . "\n";
-        // Limit boss to 1 concurrent call - returns error if already on a call
-        $xml .= '		<action application="limit" data="hash ' . $domain_name . ' boss_sec_' . $boss_ext . ' 1 !USER_BUSY"/>' . "\n";
-        $xml .= '		<action application="bridge" data="user/' . $boss_ext . '@' . $domain_name . '"/>' . "\n";
-        // If bridge failed (busy/no answer) - route back to secretary
+        // Get boss last call UUID from hash and check if still active
+        $xml .= '		<action application="set" data="boss_last_uuid=${hash(select/' . $domain_name . '-last_dial_ext/' . $boss_ext . ')}" inline="true"/>' . "\n";
+        $xml .= '		<action application="set" data="boss_call_active=${api(uuid_exists ${boss_last_uuid})}" inline="true"/>' . "\n";
+        $xml .= '	</condition>' . "\n";
+        $xml .= '</extension>' . "\n";
+
+        // Extension 3: Boss free → bridge, Boss busy → back to secretary
+        $xml .= '<extension name="Boss-Secretary Route: ' . $boss_ext . '" continue="false">' . "\n";
+        $xml .= '	<condition field="destination_number" expression="^' . $boss_ext . '$"/>' . "\n";
+        $xml .= '	<condition field="${boss_secretary_screened}" expression="^true$"/>' . "\n";
+        $xml .= '	<condition field="${boss_call_active}" expression="^true$">' . "\n";
+        // Boss BUSY - route back to secretary
         $xml .= '		<action application="set" data="boss_secretary_screened=false"/>' . "\n";
         $xml .= '		<action application="set" data="effective_caller_id_name=BUSY ' . $cid_prefix . '${caller_id_name}"/>' . "\n";
         $xml .= '		<action application="transfer" data="' . $secretary_ext . ' XML ' . $domain_name . '"/>' . "\n";
+        // Boss FREE - bridge to boss
+        $xml .= '		<anti-action application="set" data="hangup_after_bridge=true"/>' . "\n";
+        $xml .= '		<anti-action application="set" data="call_timeout=30"/>' . "\n";
+        $xml .= '		<anti-action application="bridge" data="user/' . $boss_ext . '@' . $domain_name . '"/>' . "\n";
         $xml .= '	</condition>' . "\n";
         $xml .= '</extension>' . "\n";
 
