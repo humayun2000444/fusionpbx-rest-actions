@@ -26,27 +26,12 @@ function generate_boss_secretary_dialplan($database, $dialplan_uuid, $domain_uui
     }
 
     if ($mode !== 'off') {
-        // Extension 2: Screened call - check busy via Lua, set boss_is_busy variable
-        $xml .= '<extension name="Boss-Secretary Check: ' . $boss_ext . '" continue="true">' . "\n";
-        $xml .= '	<condition field="destination_number" expression="^' . $boss_ext . '$"/>' . "\n";
-        $xml .= '	<condition field="${boss_secretary_screened}" expression="^true$">' . "\n";
-        $xml .= '		<action application="lua" data="boss-secretary-busy-check.lua ' . $boss_ext . ' ' . $domain_name . '"/>' . "\n";
-        $xml .= '	</condition>' . "\n";
-        $xml .= '</extension>' . "\n";
-
-        // Extension 3: Route based on busy check
+        // Extension 2: Screened call - Lua checks busy + bridges or routes back
         $xml .= '<extension name="Boss-Secretary Bridge: ' . $boss_ext . '" continue="false">' . "\n";
         $xml .= '	<condition field="destination_number" expression="^' . $boss_ext . '$"/>' . "\n";
-        $xml .= '	<condition field="${boss_secretary_screened}" expression="^true$"/>' . "\n";
-        $xml .= '	<condition field="${boss_is_busy}" expression="^true$">' . "\n";
-        // Boss BUSY - route back to secretary
-        $xml .= '		<action application="set" data="boss_secretary_screened=false"/>' . "\n";
-        $xml .= '		<action application="set" data="effective_caller_id_name=BUSY ' . $cid_prefix . '${caller_id_name}"/>' . "\n";
-        $xml .= '		<action application="transfer" data="' . $secretary_ext . ' XML ' . $domain_name . '"/>' . "\n";
-        // Boss FREE - bridge
-        $xml .= '		<anti-action application="set" data="hangup_after_bridge=true"/>' . "\n";
-        $xml .= '		<anti-action application="set" data="call_timeout=30"/>' . "\n";
-        $xml .= '		<anti-action application="bridge" data="user/' . $boss_ext . '@' . $domain_name . '"/>' . "\n";
+        $xml .= '	<condition field="${boss_secretary_screened}" expression="^true$">' . "\n";
+        // Lua checks busy and either bridges to boss or transfers back to secretary
+        $xml .= '		<action application="lua" data="boss-secretary-busy-check.lua ' . $boss_ext . ' ' . $domain_name . ' ' . $secretary_ext . ' ' . $cid_prefix . '"/>' . "\n";
         $xml .= '	</condition>' . "\n";
         $xml .= '</extension>' . "\n";
 

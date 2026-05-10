@@ -1,29 +1,55 @@
--- Boss-Secretary busy check
--- Usage in dialplan: <action application="lua" data="app/rest_api/actions/boss-secretary-busy-check.lua ${destination_number} ${domain_name}"/>
--- Sets channel variable boss_is_busy=true or boss_is_busy=false
+-- Boss-Secretary busy check + bridge/transfer
+-- Args: boss_ext domain secretary_ext cid_prefix
 
-local ext = argv[1]
+local boss_ext = argv[1]
 local domain = argv[2]
+local secretary_ext = argv[3]
+local cid_prefix = argv[4] or "Boss:"
 
-if not ext or not domain then
-    session:setVariable("boss_is_busy", "false")
+if not boss_ext or not domain or not secretary_ext then
     return
 end
 
--- Use show calls to find if the extension has active calls
+-- Check if boss has active calls via show calls
 local api = freeswitch.API()
 local result = api:execute("show", "calls as delim |")
 
 local busy = false
 if result then
-    -- Check if extension appears as either caller or callee in active calls
-    local pattern = ext .. "@" .. domain
+    local pattern = boss_ext .. "@" .. domain
     for line in result:gmatch("[^\n]+") do
-        if line:find(pattern, 1, true) then
-            busy = true
-            break
+        -- Skip the header line and total line
+        if line:find(pattern, 1, true) and not line:find("total") then
+            -- Make sure it's the boss as caller/callee, not our current call
+            local current_uuid = session:getVariable("uuid") or ""
+            if not line:find(current_uuid, 1, true) then
+                busy = true
+                break
+            end
         end
     end
 end
 
-session:setVariable("boss_is_busy", busy and "true" or "false")
+if busy then
+    -- Boss is busy - route back to secretary with BUSY prefix
+    freeswitch.consoleLog("NOTICE", "[boss-secretary] Boss " .. boss_ext .. " is BUSY, routing back to secretary " .. secretary_ext .. "\n")
+    session:setVariable("boss_secretary_screened", "false")
+    session:setVariable("effective_caller_id_name", "BUSY " .. cid_prefix .. " " .. (session:getVariable("caller_id_name") or ""))
+    session:setVariable("call_timeout", "20")
+    session:execute("transfer", secretary_ext .. " XML " .. domain)
+else
+    -- Boss is free - bridge to boss
+    freeswitch.consoleLog("NOTICE", "[boss-secretary] Boss " .. boss_ext .. " is FREE, bridging\n")
+    session:setVariable("hangup_after_bridge", "true")
+    session:setVariable("call_timeout", "30")
+    session:execute("bridge", "user/" .. boss_ext .. "@" .. domain)
+
+    -- If bridge fails (no answer/timeout) - route back to secretary
+    local hangup_cause = session:getVariable("originate_disposition") or ""
+    if hangup_cause ~= "SUCCESS" and session:ready() then
+        freeswitch.consoleLog("NOTICE", "[boss-secretary] Boss " .. boss_ext .. " no answer (" .. hangup_cause .. "), routing back to secretary\n")
+        session:setVariable("boss_secretary_screened", "false")
+        session:setVariable("effective_caller_id_name", "NOANSWER " .. cid_prefix .. " " .. (session:getVariable("caller_id_name") or ""))
+        session:execute("transfer", secretary_ext .. " XML " .. domain)
+    end
+end
