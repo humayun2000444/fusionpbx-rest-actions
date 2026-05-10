@@ -26,27 +26,21 @@ function generate_boss_secretary_dialplan($database, $dialplan_uuid, $domain_uui
     }
 
     if ($mode !== 'off') {
-        // Extension 2: Screened call - secretary transferred to boss (check busy)
-        $xml .= '<extension name="Boss-Secretary Screened: ' . $boss_ext . '" continue="true">' . "\n";
-        $xml .= '	<condition field="destination_number" expression="^' . $boss_ext . '$"/>' . "\n";
-        $xml .= '	<condition field="${boss_secretary_screened}" expression="^true$">' . "\n";
-        // Check if boss is on a call
-        $xml .= '		<action application="set" data="boss_call_count=${hash(select/' . $domain_name . '-call_limit/' . $boss_ext . ')}" inline="true"/>' . "\n";
-        $xml .= '	</condition>' . "\n";
-        $xml .= '</extension>' . "\n";
-
-        // Extension 3: Boss is free - bridge to boss
+        // Extension 2: Screened call - secretary transferred to boss
+        // Use limit to allow only 1 call to boss - if limit exceeded = boss busy
         $xml .= '<extension name="Boss-Secretary Bridge: ' . $boss_ext . '" continue="false">' . "\n";
         $xml .= '	<condition field="destination_number" expression="^' . $boss_ext . '$"/>' . "\n";
-        $xml .= '	<condition field="${boss_secretary_screened}" expression="^true$"/>' . "\n";
-        $xml .= '	<condition field="${boss_call_count}" expression="^0$|^$">' . "\n";
+        $xml .= '	<condition field="${boss_secretary_screened}" expression="^true$">' . "\n";
         $xml .= '		<action application="set" data="hangup_after_bridge=true"/>' . "\n";
         $xml .= '		<action application="set" data="call_timeout=30"/>' . "\n";
+        $xml .= '		<action application="set" data="continue_on_fail=true"/>' . "\n";
+        // Limit boss to 1 concurrent call - returns error if already on a call
+        $xml .= '		<action application="limit" data="hash ' . $domain_name . ' boss_sec_' . $boss_ext . ' 1 !USER_BUSY"/>' . "\n";
         $xml .= '		<action application="bridge" data="user/' . $boss_ext . '@' . $domain_name . '"/>' . "\n";
-        // Boss busy - route back to secretary
-        $xml .= '		<anti-action application="set" data="boss_secretary_screened=false"/>' . "\n";
-        $xml .= '		<anti-action application="set" data="effective_caller_id_name=BUSY ' . $cid_prefix . '${caller_id_name}"/>' . "\n";
-        $xml .= '		<anti-action application="transfer" data="' . $secretary_ext . ' XML ' . $domain_name . '"/>' . "\n";
+        // If bridge failed (busy/no answer) - route back to secretary
+        $xml .= '		<action application="set" data="boss_secretary_screened=false"/>' . "\n";
+        $xml .= '		<action application="set" data="effective_caller_id_name=BUSY ' . $cid_prefix . '${caller_id_name}"/>' . "\n";
+        $xml .= '		<action application="transfer" data="' . $secretary_ext . ' XML ' . $domain_name . '"/>' . "\n";
         $xml .= '	</condition>' . "\n";
         $xml .= '</extension>' . "\n";
 
