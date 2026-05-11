@@ -6,13 +6,16 @@ local speed_code = "*" .. (argv[1] or "")
 local domain_name = session:getVariable("domain_name") or ""
 local domain_uuid = session:getVariable("domain_uuid") or ""
 local caller_ext = session:getVariable("caller_id_number") or ""
+local referred_by = session:getVariable("referred_by_user") or ""
+local sip_from = session:getVariable("sip_from_user") or ""
+local dialed_ext = session:getVariable("dialed_extension") or ""
 
 if speed_code == "*" or domain_name == "" then
     session:execute("playback", "misc/error.wav")
     return
 end
 
-freeswitch.consoleLog("NOTICE", "[speed-dial] Looking up " .. speed_code .. " for ext " .. caller_ext .. " in domain " .. domain_name .. "\n")
+freeswitch.consoleLog("NOTICE", "[speed-dial] Looking up " .. speed_code .. " for ext " .. caller_ext .. " referred_by=" .. referred_by .. " sip_from=" .. sip_from .. " dialed_ext=" .. dialed_ext .. " in domain " .. domain_name .. "\n")
 
 -- Connect to database
 local Database = require "resources.functions.database"
@@ -69,9 +72,14 @@ if destination then
     -- Check if caller is a secretary trying to reach the boss
     -- If so, use bridge to bypass boss-secretary dialplan
     local is_secretary_to_boss = false
+    -- Check all possible caller identities (caller_id, referred_by, sip_from, dialed_extension)
+    local possible_callers = {caller_ext, referred_by, sip_from, dialed_ext}
     local bs_sql = [[SELECT boss_extension FROM v_boss_secretary
                      WHERE domain_uuid = ']] .. domain_uuid .. [['
-                     AND secretary_extension = ']] .. caller_ext .. [['
+                     AND (secretary_extension = ']] .. caller_ext .. [['
+                          OR secretary_extension = ']] .. referred_by .. [['
+                          OR secretary_extension = ']] .. sip_from .. [['
+                          OR secretary_extension = ']] .. dialed_ext .. [[')
                      AND boss_extension = ']] .. destination .. [['
                      AND enabled = 'true'
                      LIMIT 1]]
