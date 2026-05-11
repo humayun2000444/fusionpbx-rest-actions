@@ -31,7 +31,8 @@ end
 local destination = nil
 local label = nil
 
--- Personal lookup: match by caller extension
+-- Personal lookup: match by caller extension, sip_from, or dialed_extension
+-- (blind transfer keeps original caller_id, so also check dialed_extension)
 local sql = [[SELECT sd.speed_dial_number, sd.speed_dial_label
               FROM v_speed_dials sd
               JOIN v_extensions e ON sd.extension_uuid = e.extension_uuid
@@ -39,7 +40,9 @@ local sql = [[SELECT sd.speed_dial_number, sd.speed_dial_label
               AND sd.speed_dial_code = ']] .. speed_code .. [['
               AND sd.speed_dial_type = 'personal'
               AND sd.enabled = 'true'
-              AND e.extension = ']] .. caller_ext .. [['
+              AND (e.extension = ']] .. caller_ext .. [['
+                   OR e.extension = ']] .. sip_from .. [['
+                   OR e.extension = ']] .. dialed_ext .. [[')
               LIMIT 1]]
 
 dbh:query(sql, nil, function(row)
