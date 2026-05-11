@@ -20,9 +20,9 @@ function do_action($body) {
         );
     }
 
-    // Optional parameters
-    $call_block_name = isset($body->callBlockName) ? ($body->callBlockName ?: null) :
-                      (isset($body->call_block_name) ? ($body->call_block_name ?: null) : null);
+    // Name is always NULL - FusionPBX Lua requires name=NULL for number-only matching
+    // If name is set, Lua tries to match BOTH caller_id_name AND number which fails
+    $call_block_name = null;
 
     $call_block_direction = isset($body->callBlockDirection) ? $body->callBlockDirection :
                            (isset($body->call_block_direction) ? $body->call_block_direction : 'inbound');
