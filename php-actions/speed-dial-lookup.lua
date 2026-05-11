@@ -65,7 +65,35 @@ dbh:release()
 
 if destination then
     freeswitch.consoleLog("NOTICE", "[speed-dial] " .. speed_code .. " -> " .. destination .. " (" .. (label or "") .. ")\n")
-    session:execute("transfer", destination .. " XML " .. domain_name)
+
+    -- Check if caller is a secretary trying to reach the boss
+    -- If so, use bridge to bypass boss-secretary dialplan
+    local is_secretary_to_boss = false
+    local bs_sql = [[SELECT boss_extension FROM v_boss_secretary
+                     WHERE domain_uuid = ']] .. domain_uuid .. [['
+                     AND secretary_extension = ']] .. caller_ext .. [['
+                     AND boss_extension = ']] .. destination .. [['
+                     AND enabled = 'true'
+                     LIMIT 1]]
+
+    local dbh2 = Database.new('system')
+    if dbh2 then
+        dbh2:query(bs_sql, nil, function(row)
+            is_secretary_to_boss = true
+        end)
+        dbh2:release()
+    end
+
+    if is_secretary_to_boss then
+        -- Secretary dialing boss via speed dial — bridge directly, bypass boss-secretary
+        freeswitch.consoleLog("NOTICE", "[speed-dial] Secretary " .. caller_ext .. " -> Boss " .. destination .. " (direct bridge)\n")
+        session:setVariable("hangup_after_bridge", "true")
+        session:setVariable("call_timeout", "30")
+        session:execute("bridge", "user/" .. destination .. "@" .. domain_name)
+    else
+        -- Normal speed dial — transfer through dialplan
+        session:execute("transfer", destination .. " XML " .. domain_name)
+    end
 else
     freeswitch.consoleLog("WARNING", "[speed-dial] No speed dial found for " .. speed_code .. "\n")
     session:execute("playback", "ivr/ivr-invalid_entry.wav")
