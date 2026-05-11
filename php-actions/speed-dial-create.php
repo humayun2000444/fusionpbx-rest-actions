@@ -14,6 +14,7 @@ function do_action($body) {
     $label = isset($body->speedDialLabel) ? $body->speedDialLabel : (isset($body->speed_dial_label) ? $body->speed_dial_label : '');
     $type = isset($body->speedDialType) ? $body->speedDialType : (isset($body->speed_dial_type) ? $body->speed_dial_type : 'domain');
     $extension_uuid = isset($body->extensionUuid) ? $body->extensionUuid : (isset($body->extension_uuid) ? $body->extension_uuid : null);
+    if (empty($extension_uuid)) $extension_uuid = null;
     $enabled = isset($body->enabled) ? $body->enabled : 'true';
 
     // Validate code format: must start with * and be 2-3 digits
