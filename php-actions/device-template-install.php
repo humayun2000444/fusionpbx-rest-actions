@@ -5,7 +5,17 @@ function do_action($body) {
     global $domain_uuid, $domain_name;
 
     $vendor = strtolower(trim($body->vendor));
-    $base_dir = '/var/www/fusionpbx/app/provision/resources/templates/provision/';
+    // Check multiple possible template locations
+    $possible_dirs = array(
+        '/var/www/fusionpbx/resources/templates/provision/',
+        '/usr/share/fusionpbx/templates/provision/',
+        '/etc/fusionpbx/resources/templates/provision/',
+        '/var/www/fusionpbx/app/provision/resources/templates/provision/',
+    );
+    $base_dir = '/var/www/fusionpbx/resources/templates/provision/';
+    foreach ($possible_dirs as $dir) {
+        if (is_dir($dir)) { $base_dir = $dir; break; }
+    }
 
     // Validate vendor name
     if (!preg_match('/^[a-z0-9\-]+$/', $vendor)) {
