@@ -146,6 +146,54 @@ function do_action($body) {
         "insert_user" => $db_domain_uuid
     );
 
+    // Auto-detect device_template from vendor/model if not provided
+    if (empty($device_template) && !empty($device_vendor)) {
+        $vendor = strtolower($device_vendor);
+        $model = strtolower($device_model ?? '');
+
+        // Check multiple possible template directories
+        $template_dirs = array(
+            '/var/www/fusionpbx/resources/templates/provision/',
+            '/usr/share/fusionpbx/templates/provision/',
+            '/etc/fusionpbx/resources/templates/provision/',
+        );
+        $template_base = '/var/www/fusionpbx/resources/templates/provision/';
+        foreach ($template_dirs as $dir) {
+            if (is_dir($dir)) { $template_base = $dir; break; }
+        }
+
+        // Try exact model match first, then generic patterns
+        $candidates = array();
+        if (!empty($model)) {
+            $candidates[] = $vendor . '/' . $model;
+            // Try without last digits (e.g., gxp1610 -> gxp16xx)
+            $generic = preg_replace('/\d{2}$/', 'xx', $model);
+            if ($generic !== $model) $candidates[] = $vendor . '/' . $generic;
+            // Try without last 3 digits
+            $generic2 = preg_replace('/\d{3}$/', 'xx', $model);
+            if ($generic2 !== $model) $candidates[] = $vendor . '/' . $generic2;
+        }
+
+        foreach ($candidates as $candidate) {
+            if (is_dir($template_base . $candidate)) {
+                $device_template = $candidate;
+                break;
+            }
+        }
+
+        // Fallback: scan vendor directory for any matching subdirectory
+        if (empty($device_template) && is_dir($template_base . $vendor)) {
+            $entries = scandir($template_base . $vendor);
+            foreach ($entries as $entry) {
+                if ($entry === '.' || $entry === '..') continue;
+                if (is_dir($template_base . $vendor . '/' . $entry) && !empty($model) && strpos($entry, substr($model, 0, 3)) !== false) {
+                    $device_template = $vendor . '/' . $entry;
+                    break;
+                }
+            }
+        }
+    }
+
     // Add optional device fields
     $optional_device_fields = array(
         "device_vendor" => $device_vendor,
@@ -184,15 +232,32 @@ function do_action($body) {
         );
     }
 
+    // Determine outbound proxy (server IP for SIP registration)
+    // Use external_sip_ip or server IP as outbound proxy
+    $outbound_proxy = '';
+    $proxy_sql = "SELECT default_setting_value FROM v_default_settings
+                  WHERE default_setting_category = 'provision'
+                  AND default_setting_subcategory = 'outbound_proxy'
+                  AND default_setting_enabled = 'true' LIMIT 1";
+    $proxy_result = $database->select($proxy_sql, null, "row");
+    if (!empty($proxy_result['default_setting_value'])) {
+        $outbound_proxy = $proxy_result['default_setting_value'];
+    } else {
+        // Fallback: use server's external IP
+        $outbound_proxy = $_SERVER['SERVER_ADDR'] ?? $_SERVER['HTTP_HOST'] ?? '';
+    }
+
     // Create device line
     $line_sql = "INSERT INTO v_device_lines (
                     device_line_uuid, device_uuid, domain_uuid,
                     line_number, server_address, server_address_primary,
+                    outbound_proxy_primary,
                     user_id, auth_id, password, display_name, label,
                     sip_port, sip_transport, register_expires, enabled
                 ) VALUES (
                     :device_line_uuid, :device_uuid, :domain_uuid,
                     :line_number, :server_address, :server_address_primary,
+                    :outbound_proxy_primary,
                     :user_id, :auth_id, :password, :display_name, :label,
                     :sip_port, :sip_transport, :register_expires, :enabled
                 )";
@@ -204,6 +269,7 @@ function do_action($body) {
         "line_number" => "1",
         "server_address" => $db_domain_name,
         "server_address_primary" => $db_domain_name,
+        "outbound_proxy_primary" => $outbound_proxy,
         "user_id" => $extension_number,
         "auth_id" => $extension_number,
         "password" => $extension_password,
