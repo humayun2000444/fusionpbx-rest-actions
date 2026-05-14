@@ -1,6 +1,6 @@
 <?php
 
-$required_params = array("branchGroupUuid", "domainUuid", "branchPrefix");
+$required_params = array("branchGroupUuid", "branchPrefix");
 
 function do_action($body) {
     global $domain_uuid;
@@ -9,13 +9,19 @@ function do_action($body) {
                   (isset($body->branch_group_uuid) ? $body->branch_group_uuid : null);
     $member_domain_uuid = isset($body->domainUuid) ? $body->domainUuid :
                           (isset($body->domain_uuid) ? $body->domain_uuid : null);
+    $member_domain_name = isset($body->domainName) ? $body->domainName :
+                          (isset($body->domain_name) ? $body->domain_name : null);
     $prefix = isset($body->branchPrefix) ? $body->branchPrefix :
               (isset($body->branch_prefix) ? $body->branch_prefix : null);
     $label = isset($body->branchLabel) ? $body->branchLabel :
              (isset($body->branch_label) ? $body->branch_label : '');
 
-    if (empty($group_uuid) || empty($member_domain_uuid) || empty($prefix)) {
-        return array("success" => false, "error" => "branchGroupUuid, domainUuid, and branchPrefix are required");
+    if (empty($group_uuid) || empty($prefix)) {
+        return array("success" => false, "error" => "branchGroupUuid and branchPrefix are required");
+    }
+
+    if (empty($member_domain_uuid) && empty($member_domain_name)) {
+        return array("success" => false, "error" => "Either domainUuid or domainName is required");
     }
 
     // Validate prefix: must be 1-4 digits
@@ -34,14 +40,22 @@ function do_action($body) {
         return array("success" => false, "error" => "Branch group not found");
     }
 
-    // Check domain exists
-    $domain = $database->select(
-        "SELECT domain_uuid, domain_name FROM v_domains WHERE domain_uuid = :uuid",
-        array("uuid" => $member_domain_uuid), "row"
-    );
-    if (empty($domain)) {
-        return array("success" => false, "error" => "Domain not found");
+    // Look up domain by name or UUID
+    if (!empty($member_domain_name) && empty($member_domain_uuid)) {
+        $domain = $database->select(
+            "SELECT domain_uuid, domain_name FROM v_domains WHERE domain_name = :name",
+            array("name" => $member_domain_name), "row"
+        );
+    } else {
+        $domain = $database->select(
+            "SELECT domain_uuid, domain_name FROM v_domains WHERE domain_uuid = :uuid",
+            array("uuid" => $member_domain_uuid), "row"
+        );
     }
+    if (empty($domain)) {
+        return array("success" => false, "error" => "Domain not found: " . ($member_domain_name ?: $member_domain_uuid));
+    }
+    $member_domain_uuid = $domain['domain_uuid'];
 
     // Check domain not already in this group
     $existing = $database->select(
