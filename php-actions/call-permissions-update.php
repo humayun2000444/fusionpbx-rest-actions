@@ -90,6 +90,26 @@ function do_action($body) {
         );
     }
 
+    // Clear cache and reload XML so FreeSWITCH picks up the change
+    $cache_dir = $_SESSION['server']['temp']['dir'] ?? '/var/cache/fusionpbx';
+    if (is_dir($cache_dir)) {
+        array_map('unlink', glob($cache_dir . '/*'));
+    }
+    exec("fs_cli -x 'reloadxml' 2>/dev/null");
+
+    // Get extension number and domain to flush directory cache
+    $ext_sql = "SELECT e.extension, d.domain_name FROM v_extensions e JOIN v_domains d ON e.domain_uuid = d.domain_uuid WHERE e.extension_uuid = :extension_uuid";
+    $ext_row = $database->select($ext_sql, array("extension_uuid" => $extension_uuid), "row");
+    if (!empty($ext_row)) {
+        $ext = $ext_row['extension'];
+        $domain = $ext_row['domain_name'];
+        // Clear directory cache so next call fetches fresh toll_allow
+        $dir_cache = $cache_dir . '/directory.' . $ext . '@' . $domain;
+        if (file_exists($dir_cache)) {
+            @unlink($dir_cache);
+        }
+    }
+
     // Parse the updated toll_allow for response
     $permissionsList = array_map('trim', explode(',', $toll_allow));
 
