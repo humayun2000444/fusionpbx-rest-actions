@@ -79,7 +79,7 @@ function do_action($body) {
     $max_registrations = isset($body->maxRegistrations) ? $body->maxRegistrations :
                         (isset($body->max_registrations) ? $body->max_registrations : null);
     $limit_max = isset($body->limitMax) ? $body->limitMax :
-                (isset($body->limit_max) ? $body->limit_max : '5');
+                (isset($body->limit_max) ? $body->limit_max : '1');
     $limit_destination = isset($body->limitDestination) ? $body->limitDestination :
                         (isset($body->limit_destination) ? $body->limit_destination : 'error/user_busy');
     $user_context = isset($body->userContext) ? $body->userContext :
