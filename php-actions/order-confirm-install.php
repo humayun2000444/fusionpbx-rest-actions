@@ -16,10 +16,12 @@ function do_action($body) {
 
     $database = new database;
     // Split on semicolons at end of line to run statements individually.
-    $statements = array_filter(array_map('trim', preg_split('/;\s*\n/', $sql)));
+    $statements = preg_split('/;\s*\n/', $sql);
     $ran = 0; $errors = array();
     foreach ($statements as $stmt) {
-        if ($stmt === '' || strpos($stmt, '--') === 0) continue;
+        // strip whole-line SQL comments, then run whatever SQL remains
+        $stmt = trim(preg_replace('/^\s*--.*$/m', '', $stmt));
+        if ($stmt === '') continue;
         try {
             $database->execute($stmt);
             $ran++;
@@ -36,10 +38,23 @@ function do_action($body) {
         $installed = false;
     }
 
+    // Deploy the Lua IVR into the FreeSWITCH scripts dir (best-effort; needs
+    // write access). If this fails, copy order-confirm-ivr.lua there manually.
+    $lua_src  = __DIR__ . '/order-confirm-ivr.lua';
+    $lua_dest = '/usr/share/freeswitch/scripts/order-confirm-ivr.lua';
+    $lua_deployed = false;
+    if (file_exists($lua_src) && is_writable(dirname($lua_dest))) {
+        $lua_deployed = @copy($lua_src, $lua_dest);
+        if ($lua_deployed) { @chown($lua_dest, 'www-data'); @chgrp($lua_dest, 'www-data'); }
+    }
+
     return array(
         "success" => $installed,
         "message" => $installed ? "Order Confirmation schema installed" : "Install may have failed",
         "statementsRun" => $ran,
         "errors" => $errors,
+        "luaDeployed" => $lua_deployed,
+        "luaNote" => $lua_deployed ? "order-confirm-ivr.lua deployed to FreeSWITCH scripts"
+                                   : "Copy order-confirm-ivr.lua to /usr/share/freeswitch/scripts/ manually",
     );
 }

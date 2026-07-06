@@ -109,3 +109,22 @@ CREATE INDEX IF NOT EXISTS idx_oc_calls_next     ON v_order_confirm_calls (next_
 CREATE INDEX IF NOT EXISTS idx_oc_calls_cb       ON v_order_confirm_calls (callback_pending);
 CREATE INDEX IF NOT EXISTS idx_oc_calls_fsuuid   ON v_order_confirm_calls (fs_call_uuid);
 CREATE INDEX IF NOT EXISTS idx_oc_calls_order    ON v_order_confirm_calls (order_id);
+
+-- ---------- Smart-IVR extensions (folded-in migrations; idempotent) ----------
+-- Multi-provider TTS + pacing
+ALTER TABLE v_order_confirm_config ADD COLUMN IF NOT EXISTS tts_provider VARCHAR(20) DEFAULT 'free';        -- free | google | azure | elevenlabs
+ALTER TABLE v_order_confirm_config ADD COLUMN IF NOT EXISTS speech_rate VARCHAR(10) DEFAULT 'slow';         -- slow | normal | fast
+ALTER TABLE v_order_confirm_config ADD COLUMN IF NOT EXISTS answer_delay_ms INTEGER DEFAULT 2000;
+ALTER TABLE v_order_confirm_config ADD COLUMN IF NOT EXISTS tts_google_key TEXT DEFAULT '';
+ALTER TABLE v_order_confirm_config ADD COLUMN IF NOT EXISTS tts_azure_key TEXT DEFAULT '';
+ALTER TABLE v_order_confirm_config ADD COLUMN IF NOT EXISTS tts_azure_region VARCHAR(40) DEFAULT 'southeastasia';
+ALTER TABLE v_order_confirm_config ADD COLUMN IF NOT EXISTS tts_elevenlabs_key TEXT DEFAULT '';
+ALTER TABLE v_order_confirm_config ADD COLUMN IF NOT EXISTS tts_elevenlabs_voice_id VARCHAR(80) DEFAULT '';
+
+-- Dynamic keypad options + generic acknowledgement
+ALTER TABLE v_order_confirm_config ADD COLUMN IF NOT EXISTS dtmf_options JSONB DEFAULT
+  '[{"digit":"1","label":"Confirm","action":"api","value":"1"},
+    {"digit":"2","label":"Cancel","action":"api","value":"2"},
+    {"digit":"0","label":"Support","action":"transfer","value":""}]'::jsonb;
+ALTER TABLE v_order_confirm_config ADD COLUMN IF NOT EXISTS ack_text_en TEXT DEFAULT 'Thank you, your response has been recorded.';
+ALTER TABLE v_order_confirm_config ADD COLUMN IF NOT EXISTS ack_text_bn TEXT DEFAULT 'ধন্যবাদ, আপনার উত্তর গ্রহণ করা হয়েছে।';
