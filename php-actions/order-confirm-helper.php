@@ -53,11 +53,22 @@ function oc_get_config($database, $domain_uuid) {
     return $row;
 }
 
-/** Replace {name} and {order_id} placeholders. */
+/** Spell a reference out char-by-char so TTS reads "123" as "one two three"
+ *  (and letters individually) instead of "one hundred twenty three". */
+function oc_speakify($s) {
+    $clean = preg_replace('/[^A-Za-z0-9]/', '', (string)$s);
+    if ($clean === '') return (string)$s;
+    // spaced digits/letters; use commas for a small pause between characters
+    return implode(', ', str_split($clean));
+}
+
+/** Replace {name} and {order_id} placeholders. The order id is spoken
+ *  digit-by-digit (speakify) so it's clear over the phone. */
 function oc_build_text($template, $name, $order_id) {
+    $spoken_id = oc_speakify($order_id);
     return str_replace(
         array('{name}', '{order_id}', '{orderId}'),
-        array($name, $order_id, $order_id),
+        array($name, $spoken_id, $spoken_id),
         (string)$template
     );
 }
@@ -150,18 +161,23 @@ function oc_generate_tts($config, $text, $language) {
         $piper_bin = '/opt/piper/piper/piper';
         $piper_model = '/opt/piper/voices/en_US-lessac-medium.onnx';
         if ($language === 'bn') {
-            $sp = ($rate === 'slow') ? 125 : (($rate === 'fast') ? 175 : 150);
-            shell_exec('espeak-ng -v bn -s ' . $sp . ' -w ' . escapeshellarg($path) . ' ' . escapeshellarg($text) . ' 2>/dev/null');
+            // -s words/min (lower = slower), -g inter-word gap (x10ms) for clarity
+            $sp = ($rate === 'slow') ? 110 : (($rate === 'fast') ? 160 : 135);
+            $gap = ($rate === 'slow') ? 12 : (($rate === 'fast') ? 3 : 6);
+            shell_exec('espeak-ng -v bn -s ' . $sp . ' -g ' . $gap . ' -w ' . escapeshellarg($path) . ' ' . escapeshellarg($text) . ' 2>/dev/null');
         } else {
             if (is_file($piper_bin) && is_file($piper_model)) {
-                $ls = ($rate === 'slow') ? '1.35' : (($rate === 'fast') ? '0.85' : '1.0'); // length_scale: bigger = slower
+                // length_scale: bigger = slower; sentence_silence adds pauses between sentences
+                $ls = ($rate === 'slow') ? '1.55' : (($rate === 'fast') ? '0.9' : '1.15');
+                $ss = ($rate === 'slow') ? '0.6' : (($rate === 'fast') ? '0.2' : '0.4');
                 shell_exec('echo ' . escapeshellarg($text) . ' | ' . escapeshellarg($piper_bin)
                     . ' --model ' . escapeshellarg($piper_model) . ' --length_scale ' . $ls
+                    . ' --sentence_silence ' . $ss
                     . ' --output_file ' . escapeshellarg($path) . ' 2>/dev/null');
             }
             if (!(file_exists($path) && filesize($path) > 44)) {
-                $sp = ($rate === 'slow') ? 130 : 155;
-                shell_exec('espeak-ng -v en -s ' . $sp . ' -w ' . escapeshellarg($path) . ' ' . escapeshellarg($text) . ' 2>/dev/null');
+                $sp = ($rate === 'slow') ? 110 : 140;
+                shell_exec('espeak-ng -v en -s ' . $sp . ' -g 8 -w ' . escapeshellarg($path) . ' ' . escapeshellarg($text) . ' 2>/dev/null');
             }
         }
         $ok = file_exists($path) && filesize($path) > 44;
