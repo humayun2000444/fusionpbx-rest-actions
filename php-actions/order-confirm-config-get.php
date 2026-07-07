@@ -64,6 +64,8 @@ function do_action($body) {
             "ttsAzureRegion"       => isset($c['tts_azure_region']) ? $c['tts_azure_region'] : 'southeastasia',
             "ttsElevenlabsKey"     => isset($c['tts_elevenlabs_key']) ? $c['tts_elevenlabs_key'] : '',
             "ttsElevenlabsVoiceId" => isset($c['tts_elevenlabs_voice_id']) ? $c['tts_elevenlabs_voice_id'] : '',
+            "ttsOpenaiKey"         => isset($c['tts_openai_key']) ? $c['tts_openai_key'] : '',
+            "ttsOpenaiVoice"       => isset($c['tts_openai_voice']) ? $c['tts_openai_voice'] : 'nova',
             "ackTextEn"            => isset($c['ack_text_en']) ? $c['ack_text_en'] : '',
             "ackTextBn"            => isset($c['ack_text_bn']) ? $c['ack_text_bn'] : '',
             "dtmfOptions"          => (function($v){

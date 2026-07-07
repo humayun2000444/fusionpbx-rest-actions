@@ -120,6 +120,8 @@ ALTER TABLE v_order_confirm_config ADD COLUMN IF NOT EXISTS tts_azure_key TEXT D
 ALTER TABLE v_order_confirm_config ADD COLUMN IF NOT EXISTS tts_azure_region VARCHAR(40) DEFAULT 'southeastasia';
 ALTER TABLE v_order_confirm_config ADD COLUMN IF NOT EXISTS tts_elevenlabs_key TEXT DEFAULT '';
 ALTER TABLE v_order_confirm_config ADD COLUMN IF NOT EXISTS tts_elevenlabs_voice_id VARCHAR(80) DEFAULT '';
+ALTER TABLE v_order_confirm_config ADD COLUMN IF NOT EXISTS tts_openai_key TEXT DEFAULT '';
+ALTER TABLE v_order_confirm_config ADD COLUMN IF NOT EXISTS tts_openai_voice VARCHAR(40) DEFAULT 'nova';
 
 -- Dynamic keypad options + generic acknowledgement
 ALTER TABLE v_order_confirm_config ADD COLUMN IF NOT EXISTS dtmf_options JSONB DEFAULT

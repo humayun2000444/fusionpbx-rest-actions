@@ -45,6 +45,7 @@ function oc_get_config($database, $domain_uuid) {
             'tts_provider' => 'free', 'speech_rate' => 'slow', 'answer_delay_ms' => 2000,
             'tts_google_key' => '', 'tts_azure_key' => '', 'tts_azure_region' => 'southeastasia',
             'tts_elevenlabs_key' => '', 'tts_elevenlabs_voice_id' => '',
+            'tts_openai_key' => '', 'tts_openai_voice' => 'nova',
             'ack_text_en' => 'Thank you, your response has been recorded.',
             'ack_text_bn' => 'ধন্যবাদ, আপনার উত্তর গ্রহণ করা হয়েছে।',
             'dtmf_options' => '[{"digit":"1","label":"Confirm","action":"callback","value":"1"},{"digit":"2","label":"Cancel","action":"callback","value":"2"},{"digit":"0","label":"Support","action":"transfer","value":""}]',
@@ -140,6 +141,20 @@ function oc_generate_tts($config, $text, $language) {
                 'Content-Type: application/ssml+xml',
                 'X-Microsoft-OutputFormat: riff-8khz-16bit-mono-pcm',
                 'User-Agent: fusionpbx-orderconfirm')));
+        $resp = curl_exec($ch); $code = curl_getinfo($ch, CURLINFO_HTTP_CODE); curl_close($ch);
+        if ($code === 200 && $resp && substr($resp, 0, 4) === 'RIFF') { file_put_contents($path, $resp); $ok = true; }
+    }
+
+    // ---- OpenAI TTS (returns WAV directly; supports speed) ----
+    elseif ($provider === 'openai' && !empty($config['tts_openai_key'])) {
+        $voice = !empty($config['tts_openai_voice']) ? $config['tts_openai_voice'] : 'nova';
+        $speed = ($rate === 'slow') ? 0.9 : (($rate === 'fast') ? 1.15 : 1.0);
+        $payload = json_encode(array('model' => 'tts-1', 'input' => $text, 'voice' => $voice,
+            'response_format' => 'wav', 'speed' => $speed));
+        $ch = curl_init('https://api.openai.com/v1/audio/speech');
+        curl_setopt_array($ch, array(CURLOPT_POST => true, CURLOPT_POSTFIELDS => $payload,
+            CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 40, CURLOPT_HTTPHEADER => array(
+                'Authorization: Bearer ' . $config['tts_openai_key'], 'Content-Type: application/json')));
         $resp = curl_exec($ch); $code = curl_getinfo($ch, CURLINFO_HTTP_CODE); curl_close($ch);
         if ($code === 200 && $resp && substr($resp, 0, 4) === 'RIFF') { file_put_contents($path, $resp); $ok = true; }
     }
