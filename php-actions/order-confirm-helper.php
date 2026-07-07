@@ -145,6 +145,17 @@ function oc_generate_tts($config, $text, $language) {
         if ($code === 200 && $resp && substr($resp, 0, 4) === 'RIFF') { file_put_contents($path, $resp); $ok = true; }
     }
 
+    // ---- Meta MMS (free, offline neural — good Bangla; via local daemon) ----
+    elseif ($provider === 'mms') {
+        $ch = curl_init('http://127.0.0.1:5599');
+        curl_setopt_array($ch, array(CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => json_encode(array('lang' => $language, 'text' => $text)),
+            CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 30,
+            CURLOPT_HTTPHEADER => array('Content-Type: application/json')));
+        $resp = curl_exec($ch); $code = curl_getinfo($ch, CURLINFO_HTTP_CODE); curl_close($ch);
+        if ($code === 200 && $resp && substr($resp, 0, 4) === 'RIFF') { file_put_contents($path, $resp); $ok = true; }
+    }
+
     // ---- OpenAI TTS (returns WAV directly; supports speed) ----
     elseif ($provider === 'openai' && !empty($config['tts_openai_key'])) {
         $voice = !empty($config['tts_openai_voice']) ? $config['tts_openai_voice'] : 'nova';
