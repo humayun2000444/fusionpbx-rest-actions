@@ -144,16 +144,24 @@ function oc_generate_tts($config, $text, $language) {
         if ($code === 200 && $resp && substr($resp, 0, 4) === 'RIFF') { file_put_contents($path, $resp); $ok = true; }
     }
 
-    // ---- ElevenLabs (returns raw PCM 16k, we wrap as WAV) ----
+    // ---- ElevenLabs (mp3 output -> convert to 8kHz wav via sox) ----
+    // Note: ElevenLabs FREE tier blocks API voice usage (HTTP 402); a paid
+    // plan (Starter+) is required. On failure we fall through to the free engine.
     elseif ($provider === 'elevenlabs' && !empty($config['tts_elevenlabs_key']) && !empty($config['tts_elevenlabs_voice_id'])) {
         $vid = $config['tts_elevenlabs_voice_id'];
         $payload = json_encode(array('text' => $text, 'model_id' => 'eleven_multilingual_v2'));
-        $ch = curl_init("https://api.elevenlabs.io/v1/text-to-speech/$vid?output_format=pcm_16000");
+        $ch = curl_init("https://api.elevenlabs.io/v1/text-to-speech/$vid?output_format=mp3_44100_128");
         curl_setopt_array($ch, array(CURLOPT_POST => true, CURLOPT_POSTFIELDS => $payload,
             CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 40, CURLOPT_HTTPHEADER => array(
-                'xi-api-key: ' . $config['tts_elevenlabs_key'], 'Content-Type: application/json', 'Accept: audio/pcm')));
+                'xi-api-key: ' . $config['tts_elevenlabs_key'], 'Content-Type: application/json', 'Accept: audio/mpeg')));
         $resp = curl_exec($ch); $code = curl_getinfo($ch, CURLINFO_HTTP_CODE); curl_close($ch);
-        if ($code === 200 && $resp && strlen($resp) > 100) { file_put_contents($path, oc_pcm_to_wav($resp, 16000)); $ok = true; }
+        if ($code === 200 && $resp && strlen($resp) > 200 && substr($resp, 0, 1) !== '{') {
+            $mp3 = $path . '.mp3';
+            file_put_contents($mp3, $resp);
+            shell_exec('sox ' . escapeshellarg($mp3) . ' -r 8000 -c 1 ' . escapeshellarg($path) . ' 2>/dev/null');
+            @unlink($mp3);
+            $ok = file_exists($path) && filesize($path) > 44;
+        }
     }
 
     // ---- Free offline: Piper (English) / eSpeak-NG (Bengali) ----
