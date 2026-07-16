@@ -42,7 +42,7 @@ function oc_get_config($database, $domain_uuid) {
             'retry_on_no_answer' => 'true', 'retry_on_busy' => 'true',
             'retry_on_voicemail' => 'true', 'retry_on_failed' => 'true',
             'callback_retry_max' => 5, 'callback_retry_interval' => 60,
-            'tts_provider' => 'free', 'speech_rate' => 'slow', 'answer_delay_ms' => 2000,
+            'tts_provider' => 'google', 'speech_rate' => 'slow', 'answer_delay_ms' => 2000,
             'tts_google_key' => '', 'tts_azure_key' => '', 'tts_azure_region' => 'southeastasia',
             'tts_elevenlabs_key' => '', 'tts_elevenlabs_voice_id' => '',
             'tts_openai_key' => '', 'tts_openai_voice' => 'nova',
@@ -52,6 +52,22 @@ function oc_get_config($database, $domain_uuid) {
         );
     }
     return $row;
+}
+
+/** Expand digit glyphs to spoken words (offline neural TTS can't say bare
+ *  digits like "১" or "1"). Handles ASCII 0-9 and Bengali ০-৯. */
+function oc_expand_digits($text, $lang) {
+    if ($lang === 'bn') {
+        $map = array('0'=>' শূন্য ','1'=>' এক ','2'=>' দুই ','3'=>' তিন ','4'=>' চার ','5'=>' পাঁচ ','6'=>' ছয় ','7'=>' সাত ','8'=>' আট ','9'=>' নয় ',
+                     '০'=>' শূন্য ','১'=>' এক ','২'=>' দুই ','৩'=>' তিন ','৪'=>' চার ','৫'=>' পাঁচ ','৬'=>' ছয় ','৭'=>' সাত ','৮'=>' আট ','৯'=>' নয় ');
+    } else {
+        $map = array('0'=>' zero ','1'=>' one ','2'=>' two ','3'=>' three ','4'=>' four ','5'=>' five ','6'=>' six ','7'=>' seven ','8'=>' eight ','9'=>' nine ');
+    }
+    $out = '';
+    foreach (preg_split('//u', (string)$text, -1, PREG_SPLIT_NO_EMPTY) as $ch) {
+        $out .= isset($map[$ch]) ? $map[$ch] : $ch;
+    }
+    return trim(preg_replace('/\s+/', ' ', $out));
 }
 
 /** Spell a reference out char-by-char so TTS reads "123" as "one two three"
@@ -74,6 +90,84 @@ function oc_build_text($template, $name, $order_id) {
     );
 }
 
+/** Build the full {placeholder} -> spoken-value map for a call: the fixed
+ *  fields (name/order_id/phone) plus any custom fields the caller passed in
+ *  via the call's metadata JSON. Any {xyz} in a template just works as long
+ *  as "xyz" exists here — no template-specific code needed. */
+function oc_resolve_vars($call) {
+    $vars = array(
+        'name'     => isset($call['customer_name']) ? $call['customer_name'] : '',
+        'order_id' => oc_speakify(isset($call['order_id']) ? $call['order_id'] : ''),
+        'phone'    => isset($call['phone']) ? $call['phone'] : '',
+    );
+    $vars['orderId'] = $vars['order_id']; // alias
+    if (!empty($call['metadata'])) {
+        $meta = is_array($call['metadata']) ? $call['metadata'] : json_decode($call['metadata'], true);
+        if (is_array($meta)) {
+            foreach ($meta as $k => $v) {
+                if (is_scalar($v) && !isset($vars[$k])) $vars[$k] = (string)$v;
+            }
+        }
+    }
+    return $vars;
+}
+
+/** Split a template into an ordered list of {type:'text'|'var', ...} tokens
+ *  at each {placeholder} boundary. */
+function oc_split_template($template) {
+    $tokens = array();
+    $parts = preg_split('/(\{[a-zA-Z0-9_]+\})/', (string)$template, -1, PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY);
+    foreach ($parts as $p) {
+        if (preg_match('/^\{([a-zA-Z0-9_]+)\}$/', $p, $m)) {
+            $tokens[] = array('type' => 'var', 'key' => $m[1]);
+        } else {
+            $tokens[] = array('type' => 'text', 'value' => $p);
+        }
+    }
+    return $tokens;
+}
+
+/**
+ * Generate a playback spec for a whole template, synthesizing each literal
+ * chunk and each {placeholder} value as its own small audio file (each
+ * individually cached by oc_generate_tts), then chaining them into one
+ * continuous prompt via FreeSWITCH's "file_string://a.wav!b.wav!..." — no
+ * audio merging needed. The literal chunks are identical across every call
+ * for a given template, so after the first call they're a permanent cache
+ * hit; only the {placeholder} values are generated fresh per call.
+ * Falls back to single-shot whole-text synthesis if any segment fails.
+ */
+function oc_generate_tts_chain($config, $template, $vars, $language) {
+    $template = trim((string)$template);
+    if ($template === '') return 'flite:';
+
+    $files = array();
+    $all_ok = true;
+    foreach (oc_split_template($template) as $tok) {
+        if ($tok['type'] === 'text') {
+            if (trim($tok['value']) === '') continue;
+            $spec = oc_generate_tts($config, $tok['value'], $language);
+        } else {
+            $val = isset($vars[$tok['key']]) ? trim((string)$vars[$tok['key']]) : '';
+            if ($val === '') continue;
+            $spec = oc_generate_tts($config, $val, $language);
+        }
+        if (strpos($spec, 'file:') === 0) {
+            $files[] = substr($spec, 5);
+        } else {
+            $all_ok = false; // this segment couldn't be synthesized
+        }
+    }
+
+    if (!$all_ok || empty($files)) {
+        $full = $template;
+        foreach ($vars as $k => $v) $full = str_replace('{' . $k . '}', $v, $full);
+        return oc_generate_tts($config, $full, $language); // safety-net: single-shot
+    }
+    if (count($files) === 1) return 'file:' . $files[0];
+    return 'file_string://' . implode('!', $files);
+}
+
 /**
  * Generate a playback spec for the Lua IVR.
  *   - If Google TTS is available -> synthesize a wav and return "file:/abs/path.wav"
@@ -91,14 +185,14 @@ function oc_pcm_to_wav($pcm, $rate) {
 /**
  * Generate a playback spec ("file:/path.wav" or "flite:text") for the IVR.
  * Provider is chosen from $config['tts_provider']:
- *   google | azure | elevenlabs | free (Piper=en / eSpeak=bn, no key needed)
- * Falls back to the free offline engines if a cloud provider errors.
+ *   google | azure | openai | elevenlabs
+ * Falls back to the offline engines only if the configured cloud provider errors.
  */
 function oc_generate_tts($config, $text, $language) {
     $text = trim((string)$text);
     if ($text === '') return 'flite:';
 
-    $provider = isset($config['tts_provider']) && $config['tts_provider'] !== '' ? $config['tts_provider'] : 'free';
+    $provider = isset($config['tts_provider']) && $config['tts_provider'] !== '' ? $config['tts_provider'] : 'google';
     $gender   = $config['voice_gender'] ?: 'FEMALE';
     $rate     = isset($config['speech_rate']) && $config['speech_rate'] !== '' ? $config['speech_rate'] : 'slow';
 
@@ -145,17 +239,6 @@ function oc_generate_tts($config, $text, $language) {
         if ($code === 200 && $resp && substr($resp, 0, 4) === 'RIFF') { file_put_contents($path, $resp); $ok = true; }
     }
 
-    // ---- Meta MMS (free, offline neural — good Bangla; via local daemon) ----
-    elseif ($provider === 'mms') {
-        $ch = curl_init('http://127.0.0.1:5599');
-        curl_setopt_array($ch, array(CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => json_encode(array('lang' => $language, 'text' => $text)),
-            CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 30,
-            CURLOPT_HTTPHEADER => array('Content-Type: application/json')));
-        $resp = curl_exec($ch); $code = curl_getinfo($ch, CURLINFO_HTTP_CODE); curl_close($ch);
-        if ($code === 200 && $resp && substr($resp, 0, 4) === 'RIFF') { file_put_contents($path, $resp); $ok = true; }
-    }
-
     // ---- OpenAI TTS (returns WAV directly; supports speed) ----
     elseif ($provider === 'openai' && !empty($config['tts_openai_key'])) {
         $voice = !empty($config['tts_openai_voice']) ? $config['tts_openai_voice'] : 'nova';
@@ -172,7 +255,7 @@ function oc_generate_tts($config, $text, $language) {
 
     // ---- ElevenLabs (mp3 output -> convert to 8kHz wav via sox) ----
     // Note: ElevenLabs FREE tier blocks API voice usage (HTTP 402); a paid
-    // plan (Starter+) is required. On failure we fall through to the free engine.
+    // plan (Starter+) is required.
     elseif ($provider === 'elevenlabs' && !empty($config['tts_elevenlabs_key']) && !empty($config['tts_elevenlabs_voice_id'])) {
         $vid = $config['tts_elevenlabs_voice_id'];
         $payload = json_encode(array('text' => $text, 'model_id' => 'eleven_multilingual_v2'));
@@ -190,10 +273,13 @@ function oc_generate_tts($config, $text, $language) {
         }
     }
 
-    // ---- Free offline: Piper (English) / eSpeak-NG (Bengali) ----
+    // ---- Emergency fallback (not user-selectable): if the configured cloud
+    // provider fails (bad key, quota, network), speak something rather than
+    // nothing, using the on-server offline engines. ----
     if (!$ok) {
         $piper_bin = '/opt/piper/piper/piper';
         $piper_model = '/opt/piper/voices/en_US-lessac-medium.onnx';
+        $text = oc_expand_digits($text, $language);   // Piper/eSpeak: digits -> words
         if ($language === 'bn') {
             // -s words/min (lower = slower), -g inter-word gap (x10ms) for clarity
             $sp = ($rate === 'slow') ? 110 : (($rate === 'fast') ? 160 : 135);
@@ -266,9 +352,9 @@ function oc_originate($database, $call, $config) {
         ? (isset($config['ack_text_bn']) ? $config['ack_text_bn'] : 'ধন্যবাদ।')
         : (isset($config['ack_text_en']) ? $config['ack_text_en'] : 'Thank you, your response has been recorded.');
 
-    $msg  = oc_build_text($tmpl, $call['customer_name'], $call['order_id']);
-    $tts  = oc_generate_tts($config, $msg, $language);
-    $ack  = oc_generate_tts($config, oc_build_text($ack_t, $call['customer_name'], $call['order_id']), $language);
+    $vars = oc_resolve_vars($call);
+    $tts  = oc_generate_tts_chain($config, $tmpl, $vars, $language);
+    $ack  = oc_generate_tts_chain($config, $ack_t, $vars, $language);
 
     // Dynamic DTMF option map. Each option: digit,label,action(callback|transfer|hangup),value.
     $opts = array();
@@ -304,7 +390,7 @@ function oc_originate($database, $call, $config) {
         // per-option spoken response
         $sayt = ($language === 'bn') ? (isset($o['sayBn']) ? $o['sayBn'] : '') : (isset($o['sayEn']) ? $o['sayEn'] : '');
         $sayspec = ($sayt !== '')
-            ? oc_generate_tts($config, oc_build_text($sayt, $call['customer_name'], $call['order_id']), $language)
+            ? oc_generate_tts_chain($config, $sayt, $vars, $language)
             : $ack;
         $valid .= $d;
         $lines[] = "$d~$a~$v~$l~" . base64_encode($sayspec);

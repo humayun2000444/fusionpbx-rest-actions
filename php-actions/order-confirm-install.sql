@@ -112,7 +112,7 @@ CREATE INDEX IF NOT EXISTS idx_oc_calls_order    ON v_order_confirm_calls (order
 
 -- ---------- Smart-IVR extensions (folded-in migrations; idempotent) ----------
 -- Multi-provider TTS + pacing
-ALTER TABLE v_order_confirm_config ADD COLUMN IF NOT EXISTS tts_provider VARCHAR(20) DEFAULT 'free';        -- free | google | azure | elevenlabs
+ALTER TABLE v_order_confirm_config ADD COLUMN IF NOT EXISTS tts_provider VARCHAR(20) DEFAULT 'google';       -- google | azure | openai
 ALTER TABLE v_order_confirm_config ADD COLUMN IF NOT EXISTS speech_rate VARCHAR(10) DEFAULT 'slow';         -- slow | normal | fast
 ALTER TABLE v_order_confirm_config ADD COLUMN IF NOT EXISTS answer_delay_ms INTEGER DEFAULT 2000;
 ALTER TABLE v_order_confirm_config ADD COLUMN IF NOT EXISTS tts_google_key TEXT DEFAULT '';

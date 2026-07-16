@@ -7,7 +7,8 @@
 -- Channel variables (set by oc_originate in order-confirm-helper.php):
 --   oc_call_uuid, oc_domain_name, oc_support, oc_amd,
 --   oc_msg_b64, oc_confirm_b64, oc_cancel_b64   (playback specs, base64)
--- A playback spec is either "file:/abs/path.wav" or "flite:English text".
+-- A playback spec is "file:/abs/path.wav", "file_string://a.wav!b.wav!..."
+-- (chained multi-segment prompt), or "flite:English text".
 
 -- ---------- tiny base64 decoder (no external deps) ----------
 local b = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
@@ -65,7 +66,8 @@ end
 local FALLBACK_PROMPT = "ivr/ivr-welcome_to_freeswitch.wav"
 
 local function tts_file(spec)
-    -- returns a playable file path, or nil if the spec is not a real file
+    -- returns a playable path/URI, or nil if the spec is not real audio
+    if spec:sub(1, 14) == "file_string://" then return spec end  -- chained prompt, pass through as-is
     local kind = spec:match("^(%a+):")
     if kind == "file" then return (spec:gsub("^%a+:", "")) end
     -- "flite:" specs need a TTS engine; if flite is loaded use it, else fallback

@@ -5,7 +5,7 @@
 - **Host:** 114.130.145.82
 - **Port:** 22
 - **Username:** telcobright
-- **Password:** Takay1#$ane%%
+- **Password:** eRSJD2F46xpnhwgYuN9SmxORzdgL
 
 ## REST API Location on Server
 
@@ -44,10 +44,10 @@ curl -s -k -X POST https://114.130.145.82/app/rest_api/rest.php \
 
 ```bash
 # Copy files to server
-sshpass -p 'Takay1#$ane%%' scp -P 22 -o StrictHostKeyChecking=no /home/prototype/humayun/fusionpbx/php-actions/*.php telcobright@114.130.145.82:/tmp/
+sshpass -p 'eRSJD2F46xpnhwgYuN9SmxORzdgL' scp -P 22 -o StrictHostKeyChecking=no /home/prototype/humayun/fusionpbx/php-actions/*.php telcobright@114.130.145.82:/tmp/
 
 # Deploy to FusionPBX
-sshpass -p 'Takay1#$ane%%' ssh -p 22 -o StrictHostKeyChecking=no telcobright@114.130.145.82 "echo 'Takay1#\$ane%%' | sudo -S cp /tmp/*.php /var/www/fusionpbx/app/rest_api/actions/ && echo 'Takay1#\$ane%%' | sudo -S chown www-data:www-data /var/www/fusionpbx/app/rest_api/actions/*.php"
+sshpass -p 'eRSJD2F46xpnhwgYuN9SmxORzdgL' ssh -p 22 -o StrictHostKeyChecking=no telcobright@114.130.145.82 "echo 'eRSJD2F46xpnhwgYuN9SmxORzdgL' | sudo -S cp /tmp/*.php /var/www/fusionpbx/app/rest_api/actions/ && echo 'eRSJD2F46xpnhwgYuN9SmxORzdgL' | sudo -S chown www-data:www-data /var/www/fusionpbx/app/rest_api/actions/*.php"
 ```
 
 ## Local Development Path

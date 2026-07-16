@@ -56,7 +56,7 @@ function do_action($body) {
             "retryOnFailed"        => $b($c['retry_on_failed']),
             "callbackRetryMax"     => intval($c['callback_retry_max']),
             "callbackRetryInterval"=> intval($c['callback_retry_interval']),
-            "ttsProvider"          => isset($c['tts_provider']) ? $c['tts_provider'] : 'free',
+            "ttsProvider"          => isset($c['tts_provider']) ? $c['tts_provider'] : 'google',
             "speechRate"           => isset($c['speech_rate']) ? $c['speech_rate'] : 'slow',
             "answerDelayMs"        => isset($c['answer_delay_ms']) ? intval($c['answer_delay_ms']) : 2000,
             "ttsGoogleKey"         => isset($c['tts_google_key']) ? $c['tts_google_key'] : '',
